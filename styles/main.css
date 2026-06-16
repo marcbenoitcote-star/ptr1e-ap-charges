@@ -61,6 +61,75 @@
   line-height: 1.2;
 }
 
+.ptr-ap-charge-controls.standalone {
+  justify-content: flex-start;
+  margin: 2px 0 8px;
+}
+
+.ptr-ap-charge-control,
+.ptr-ap-cost-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  margin: 1px 3px;
+  vertical-align: middle;
+}
+
+.ptr-ap-charge-control button,
+.ptr-ap-cost-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  min-height: 20px;
+  margin: 0;
+  padding: 1px 5px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #1f2933;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ptr-ap-charge-control button {
+  width: 22px;
+  padding: 1px;
+}
+
+.ptr-ap-cost-controls button {
+  gap: 4px;
+  font-weight: 700;
+}
+
+.ptr-ap-cost-controls small {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.78;
+}
+
+.ptr-ap-cost-controls button[data-ptr-ap-action="toggle-bind"] {
+  border-color: rgba(157, 113, 20, 0.65);
+  background: rgba(231, 191, 66, 0.24);
+}
+
+.ptr-ap-cost-controls button[data-ptr-ap-action="toggle-bind"].active {
+  background: #e7bf42;
+  color: #1f2933;
+}
+
+.ptr-ap-cost-controls button[data-ptr-ap-action="toggle-drain"] {
+  border-color: rgba(150, 49, 49, 0.65);
+  background: rgba(212, 77, 77, 0.22);
+}
+
+.ptr-ap-cost-controls button[data-ptr-ap-action="toggle-drain"].active {
+  background: #d44d4d;
+  color: #ffffff;
+}
+
 .ptr-ap-charge-badge {
   display: inline-flex;
   align-items: center;

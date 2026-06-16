@@ -1,6 +1,8 @@
 const MODULE_ID = "ptr1e-ap-charges";
 const CHARGE_FLAG = "chargeState";
+const AP_STATE_FLAG = "apState";
 const PATCHED = Symbol("ptr1eApChargesPatched");
+const ATTACK_PATCHED = Symbol("ptr1eApChargesAttackPatched");
 
 const SETTINGS = {
   autoDetect: "autoDetectFrequency",
@@ -10,6 +12,12 @@ const SETTINGS = {
 const CHARGE_FREQUENCIES = {
   scene: { labelKey: "PTR_AP.Scene", fallback: "Scene" },
   daily: { labelKey: "PTR_AP.Daily", fallback: "Daily" }
+};
+
+const RESET_TYPES = {
+  scene: { labelKey: "PTR_AP.Scene", fallback: "Scene" },
+  daily: { labelKey: "PTR_AP.Daily", fallback: "Daily" },
+  extendedRest: { labelKey: "PTR_AP.ExtendedRest", fallback: "Extended Rest" }
 };
 
 Hooks.once("init", () => {
@@ -25,11 +33,12 @@ Hooks.once("ready", () => {
   if (game.system.id !== "ptu") return;
   registerChargeRuleElement();
   patchItemUse();
+  patchPrepareAttack();
   exposeApi();
   console.log(`${MODULE_ID} | Ready.`);
 });
 
-for (const hook of ["renderActorSheet", "renderPTUActorSheet", "renderPTUCharacterSheet"]) {
+for (const hook of ["renderActorSheet", "renderPTUActorSheet", "renderPTUCharacterSheet", "renderPTUPokemonSheet"]) {
   Hooks.on(hook, (app, html) => {
     enhanceActorSheet(app, html).catch((error) => warn("actor-sheet", error));
   });
@@ -42,7 +51,7 @@ for (const hook of ["renderItemSheet", "renderPTUItemSheet"]) {
 }
 
 Hooks.on("preUpdateActor", (actor, changes, _options, userId) => {
-  if (game.system.id !== "ptu" || actor.type !== "character" || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
+  if (game.system.id !== "ptu" || !hasApResource(actor) || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
   const nextValue = foundry.utils.getProperty(changes, "system.ap.value");
   if (nextValue === undefined) return;
 
@@ -114,13 +123,14 @@ function registerChargeRuleElement() {
 
 async function enhanceActorSheet(app, html) {
   const actor = app?.actor ?? app?.document ?? app?.object;
-  if (!actor || actor.type !== "character") return;
+  if (!isSupportedActor(actor)) return;
 
   const root = getSheetRoot(app, html);
   if (!root) return;
 
-  injectApMeter(actor, root);
-  injectChargeBadges(actor, root);
+  if (hasApResource(actor)) injectApMeter(actor, root);
+  else injectResetControls(actor, root);
+  injectItemBadgesAndControls(actor, root);
   bindActorSheetControls(actor, root);
 }
 
@@ -146,11 +156,7 @@ function injectApMeter(actor, root) {
     input.title = tooltip;
   }
 
-  const apBox = root.querySelector(".ap-range")?.closest(".swsh-box");
-  const body = apBox?.querySelector(".swsh-body");
-  if (body && actor.isOwner) {
-    body.insertAdjacentElement("beforeend", renderResetControls());
-  }
+  injectResetControls(actor, root);
 
   queueActorApClamp(actor, ap);
 }
@@ -186,9 +192,23 @@ function getApSegmentClass(index, ap) {
   return "drain";
 }
 
-function renderResetControls() {
+function injectResetControls(actor, root) {
+  root.querySelectorAll(".ptr-ap-charge-controls").forEach((element) => element.remove());
+  if (!actor.isOwner) return;
+
+  const apBody = root.querySelector(".ap-range")?.closest(".swsh-box")?.querySelector(".swsh-body");
+  if (apBody) {
+    apBody.insertAdjacentElement("beforeend", renderResetControls());
+    return;
+  }
+
+  const tab = root.querySelector('.tab[data-tab="moves"], .tab[data-tab="features"], .sheet-body');
+  if (tab) tab.insertAdjacentElement("afterbegin", renderResetControls("standalone"));
+}
+
+function renderResetControls(extraClass = "") {
   const controls = document.createElement("div");
-  controls.className = "ptr-ap-charge-controls";
+  controls.className = `ptr-ap-charge-controls ${extraClass}`.trim();
 
   const scene = document.createElement("button");
   scene.type = "button";
@@ -199,32 +219,98 @@ function renderResetControls() {
   const daily = document.createElement("button");
   daily.type = "button";
   daily.dataset.ptrApAction = "reset-daily";
-  daily.title = label("PTR_AP.ResetDaily", "Reset Daily");
+  daily.title = label("PTR_AP.ResetDaily", "Reset Daily / Extended Rest");
   daily.innerHTML = `<i class="fas fa-bed"></i> <span>${escapeHtml(label("PTR_AP.Daily", "Daily"))}</span>`;
 
   controls.append(scene, daily);
   return controls;
 }
 
-function injectChargeBadges(actor, root) {
-  root.querySelectorAll(".ptr-ap-charge-badge").forEach((element) => element.remove());
+function injectItemBadgesAndControls(actor, root) {
+  root.querySelectorAll(".ptr-ap-charge-control, .ptr-ap-cost-controls").forEach((element) => element.remove());
   for (const row of root.querySelectorAll("li.item[data-item-id]")) {
     const item = getItemFromRow(actor, row);
-    const state = getChargeState(item);
-    if (!state) continue;
+    if (!item) continue;
 
-    const target = row.querySelector(".move-tags") ?? row.querySelector(".item-tags") ?? row.querySelector(".item-controls");
-    if (!target) continue;
-    target.append(renderChargeBadge(state));
+    const state = getChargeState(item);
+    const apCost = getManualApConfig(item);
+    if (!state && !apCost) continue;
+
+    const tagTarget = row.querySelector(".move-tags") ?? row.querySelector(".item-tags") ?? row.querySelector(".item-controls");
+    const controlTarget = row.querySelector(".move-tags") ?? row.querySelector(".item-tags") ?? row.querySelector(".item-controls");
+    if (state && tagTarget) tagTarget.append(renderChargeControl(item, state));
+    if (apCost && controlTarget) controlTarget.prepend(renderApCostControls(item, apCost));
   }
 }
 
-function renderChargeBadge(state) {
-  const badge = document.createElement("div");
+function renderChargeControl(item, state) {
+  const control = document.createElement("div");
+  control.className = "ptr-ap-charge-control";
+  control.dataset.itemId = item.id;
+
+  const useButton = renderIconButton("charge-use", item.id, "fa-play", label("PTR_AP.UseCharge", "Use Charge"));
+  const minusButton = renderIconButton("charge-decrease", item.id, "fa-minus", label("PTR_AP.DecreaseCharge", "Decrease Charge"));
+  const plusButton = renderIconButton("charge-increase", item.id, "fa-plus", label("PTR_AP.IncreaseCharge", "Increase Charge"));
+  const resetButton = renderIconButton("charge-reset", item.id, "fa-rotate-right", label("PTR_AP.ResetCharge", "Reset Charge"));
+
+  const badge = document.createElement("span");
   badge.className = `ptr-ap-charge-badge ${state.frequency} ${state.remaining <= 0 ? "empty" : ""}`;
   badge.title = `${state.remaining}/${state.max} ${state.frequencyLabel}`;
   badge.textContent = `${state.remaining}/${state.max} ${state.frequencyLabel}`;
-  return badge;
+
+  control.append(useButton, minusButton, badge, plusButton, resetButton);
+  return control;
+}
+
+function renderApCostControls(item, config) {
+  const controls = document.createElement("div");
+  controls.className = "ptr-ap-cost-controls";
+  controls.dataset.itemId = item.id;
+
+  const state = getManualApState(item, config);
+  if (config.bind > 0) {
+    const bindButton = renderTextButton(
+      "toggle-bind",
+      item.id,
+      state.bindActive ? label("PTR_AP.DisableBind", "Disable Bind") : label("PTR_AP.ActivateBind", "Activate Bind"),
+      `${config.bind} AP`
+    );
+    if (state.bindActive) bindButton.classList.add("active");
+    controls.append(bindButton);
+  }
+
+  if (config.drain > 0) {
+    const drainButton = renderTextButton(
+      "toggle-drain",
+      item.id,
+      state.drainActive ? label("PTR_AP.RemoveDrain", "Remove Drain") : label("PTR_AP.ApplyDrain", "Apply Drain"),
+      `${config.drain} AP`
+    );
+    if (state.drainActive) drainButton.classList.add("active");
+    controls.append(drainButton);
+  }
+
+  return controls;
+}
+
+function renderIconButton(action, itemId, icon, title) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.ptrApAction = action;
+  button.dataset.itemId = itemId;
+  button.title = title;
+  button.innerHTML = `<i class="fas ${icon}"></i>`;
+  return button;
+}
+
+function renderTextButton(action, itemId, labelText, detail) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.ptrApAction = action;
+  button.dataset.itemId = itemId;
+  button.title = `${labelText} (${detail})`;
+  button.innerHTML = `<span>${escapeHtml(labelText)}</span><small>${escapeHtml(detail)}</small>`;
+  return button;
 }
 
 function bindActorSheetControls(actor, root) {
@@ -232,15 +318,13 @@ function bindActorSheetControls(actor, root) {
   root.dataset.ptrApChargesBound = "true";
 
   root.addEventListener("click", (event) => {
-    const resetButton = event.target.closest("[data-ptr-ap-action]");
-    if (resetButton) {
+    const actionButton = event.target.closest("[data-ptr-ap-action]");
+    if (actionButton) {
       event.preventDefault();
-      const resetType = resetButton.dataset.ptrApAction === "reset-daily" ? "daily" : "scene";
-      resetActorCharges(actor, resetType, { notify: true }).catch((error) => warn("manual-reset", error));
+      event.stopImmediatePropagation();
+      handleActorActionClick(actor, actionButton).catch((error) => warn("actor-action", error));
       return;
     }
-
-    handleChargeUseClick(actor, event);
   }, true);
 
   root.addEventListener("change", (event) => {
@@ -258,25 +342,40 @@ function bindActorSheetControls(actor, root) {
   }, true);
 }
 
-function handleChargeUseClick(actor, event) {
-  const trigger = event.target.closest(".item .item-icon.rollable, .gen8move.rollable, [data-ptr-ap-charge-use]");
-  if (!trigger) return;
-
-  const row = trigger.closest("li.item[data-item-id]");
-  if (!row) return;
-
-  const item = getItemFromRow(actor, row);
-  const state = getChargeState(item);
-  if (!state) return;
-
-  if (state.remaining <= 0 || !item?.isOwner) {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    notifyNoCharges(item, state);
+async function handleActorActionClick(actor, button) {
+  const action = button.dataset.ptrApAction;
+  if (action === "reset-scene" || action === "reset-daily") {
+    const resetType = action === "reset-daily" ? "daily" : "scene";
+    await resetActorCharges(actor, resetType, { notify: true });
     return;
   }
 
-  consumeCharge(item, 1, { notify: true }).catch((error) => warn("consume-click", error));
+  const item = getItemFromAction(actor, button);
+  if (!item) return;
+
+  if (action === "charge-use") {
+    await consumeCharge(item, 1, { notify: true });
+    return;
+  }
+
+  if (action === "charge-decrease") {
+    await adjustCharge(item, -1);
+    return;
+  }
+
+  if (action === "charge-increase") {
+    await adjustCharge(item, 1);
+    return;
+  }
+
+  if (action === "charge-reset") {
+    await resetItemCharge(item);
+    return;
+  }
+
+  if (action === "toggle-bind" || action === "toggle-drain") {
+    await toggleManualApState(item, action === "toggle-bind" ? "bind" : "drain");
+  }
 }
 
 async function enhanceItemSheet(app, html) {
@@ -313,7 +412,11 @@ function injectChargeRuleForms(item, root) {
     const rules = foundry.utils.deepClone(item.toObject().system?.rules ?? []);
     if (!rules[index]) return;
 
-    const value = field === "max" ? clampInt(event.target.value, 1, 99) : normalizeFrequency(event.target.value) ?? "scene";
+    const value = field === "max"
+      ? clampInt(event.target.value, 1, 99)
+      : field === "reset"
+        ? normalizeReset(event.target.value) ?? "scene"
+        : normalizeFrequency(event.target.value) ?? "scene";
     rules[index][field] = value;
     item.update({ "system.rules": rules });
   });
@@ -330,7 +433,7 @@ function renderChargeRuleForm(rule, index) {
     renderFieldLabel("PTR_AP.Rule.Max", "Max Charges"),
     renderNumberInput("max", clampInt(rule.max, 1, 99)),
     renderFieldLabel("PTR_AP.Rule.Reset", "Reset"),
-    renderFrequencySelect("reset", normalizeFrequency(rule.reset ?? rule.frequency) ?? "scene")
+    renderResetSelect("reset", normalizeReset(rule.reset ?? rule.frequency) ?? "scene")
   );
 
   return form;
@@ -351,6 +454,21 @@ function renderFrequencySelect(field, selected) {
     option.value = id;
     option.selected = id === selected;
     option.textContent = getFrequencyLabel(id);
+    select.append(option);
+  }
+
+  return select;
+}
+
+function renderResetSelect(field, selected) {
+  const select = document.createElement("select");
+  select.dataset.ptrApRuleField = field;
+
+  for (const id of Object.keys(RESET_TYPES)) {
+    const option = document.createElement("option");
+    option.value = id;
+    option.selected = id === selected;
+    option.textContent = getResetLabel(id);
     select.append(option);
   }
 
@@ -392,6 +510,34 @@ function patchItemUse() {
   }
 }
 
+function patchPrepareAttack() {
+  const proto = CONFIG.PTU?.Actor?.documentClass?.prototype;
+  if (!proto?.prepareAttack || proto.prepareAttack[ATTACK_PATCHED]) return;
+
+  const original = proto.prepareAttack;
+  function patchedPrepareAttack(move) {
+    const action = original.call(this, move);
+    if (!action?.roll || !move || action.roll[PATCHED]) return action;
+
+    const sourceItem = this.items?.get(move.id) ?? this.items?.get(move.realId) ?? move;
+    const originalRoll = action.roll;
+    async function patchedRoll(params = {}) {
+      const state = getChargeState(sourceItem);
+      if (state) {
+        const consumed = await consumeCharge(sourceItem, 1, { notify: true });
+        if (!consumed) return null;
+      }
+      return originalRoll.call(this, params);
+    }
+    patchedRoll[PATCHED] = true;
+    action.roll = patchedRoll;
+    return action;
+  }
+
+  patchedPrepareAttack[ATTACK_PATCHED] = true;
+  proto.prepareAttack = patchedPrepareAttack;
+}
+
 function getActorApData(actor) {
   const nativeUsableMax = clampInt(actor.system?.ap?.max, 0, 999);
   const nativeBind = clampInt(actor.system?.ap?.bound, 0, 999);
@@ -421,10 +567,16 @@ function getItemApAdjustments(actor) {
   for (const item of items) {
     if (!isActiveApSource(item)) continue;
 
-    const keywords = parseApKeywords(item);
     const rules = parseActionPointRules(item);
-    totals.bind += Math.max(keywords.bind, rules.bind);
-    totals.drain += Math.max(keywords.drain, rules.drain);
+    totals.bind += rules.bind;
+    totals.drain += rules.drain;
+
+    const manual = getManualApConfig(item);
+    if (!manual) continue;
+
+    const state = getManualApState(item, manual);
+    if (state.bindActive) totals.bind += manual.bind;
+    if (state.drainActive) totals.drain += manual.drain;
   }
 
   return totals;
@@ -437,14 +589,85 @@ function isActiveApSource(item) {
   return ["feat", "edge", "move", "ability", "item", "effect", "condition", "pokeedge", "capability"].includes(item.type);
 }
 
-function parseApKeywords(item) {
-  const totals = { bind: 0, drain: 0 };
-  for (const keyword of normalizeKeywords(item.system?.keywords)) {
-    const match = /\bAP[-\s]?(Bind|Drain)[-\s]?(\d+)\b/i.exec(keyword);
-    if (!match) continue;
+function getManualApConfig(item) {
+  if (!isActiveApSource(item)) return null;
 
-    const kind = match[1].toLowerCase() === "bind" ? "bind" : "drain";
-    totals[kind] += clampInt(match[2], 0, 99);
+  const nativeRules = parseActionPointRules(item);
+  const parsed = parseApText(collectItemText(item));
+  const bind = nativeRules.bind > 0 ? 0 : parsed.bind;
+  const drain = nativeRules.drain > 0 ? 0 : parsed.drain;
+  if (bind <= 0 && drain <= 0) return null;
+
+  return {
+    bind,
+    drain,
+    signature: `bind:${bind}:drain:${drain}`
+  };
+}
+
+function getManualApState(item, config = getManualApConfig(item)) {
+  const stored = item?.getFlag?.(MODULE_ID, AP_STATE_FLAG) ?? {};
+  if (!config || stored.signature !== config.signature) {
+    return {
+      bindActive: false,
+      drainActive: false,
+      signature: config?.signature ?? ""
+    };
+  }
+
+  return {
+    bindActive: !!stored.bindActive,
+    drainActive: !!stored.drainActive,
+    signature: config.signature
+  };
+}
+
+async function toggleManualApState(item, kind) {
+  const config = getManualApConfig(item);
+  if (!config || !item?.isOwner) return false;
+
+  const state = getManualApState(item, config);
+  if (kind === "bind" && config.bind > 0) state.bindActive = !state.bindActive;
+  if (kind === "drain" && config.drain > 0) state.drainActive = !state.drainActive;
+
+  await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
+  queueActorApClamp(item.actor);
+  item.actor?.sheet?.render(false);
+  return true;
+}
+
+function collectItemText(item) {
+  return [
+    item.name,
+    item.system?.frequency,
+    item.system?.effect,
+    item.system?.snippet,
+    item.system?.notes,
+    item.system?.trigger,
+    item.system?.range,
+    ...normalizeKeywords(item.system?.keywords)
+  ].filter(Boolean).join(" ");
+}
+
+function parseApText(text) {
+  const totals = { bind: 0, drain: 0 };
+  const source = String(text ?? "");
+  const patterns = [
+    /\bAP[-\s]?(Bind|Drain)[-\s:]?(\d+)\b/gi,
+    /\b(Bind|Drain)\s+(\d+)\s*AP\b/gi,
+    /\b(\d+)\s*AP\s*(Bind|Drain)\b/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const first = String(match[1] ?? "");
+      const second = String(match[2] ?? "");
+      const kindText = /\d+/.test(first) ? second : first;
+      const valueText = /\d+/.test(first) ? first : second;
+      const kind = kindText.toLowerCase() === "bind" ? "bind" : kindText.toLowerCase() === "drain" ? "drain" : null;
+      if (!kind) continue;
+      totals[kind] = Math.max(totals[kind], clampInt(valueText, 0, 99));
+    }
   }
   return totals;
 }
@@ -517,7 +740,7 @@ function getChargeState(item) {
     remaining,
     signature,
     frequencyLabel: getFrequencyLabel(config.frequency),
-    resetLabel: getFrequencyLabel(config.reset)
+    resetLabel: getResetLabel(config.reset)
   };
 }
 
@@ -528,7 +751,7 @@ function getChargeConfig(item) {
     const frequency = normalizeFrequency(rule.frequency) ?? normalizeFrequency(rule.reset) ?? "scene";
     return {
       frequency,
-      reset: normalizeFrequency(rule.reset) ?? frequency,
+      reset: normalizeReset(rule.reset) ?? frequency,
       max: clampInt(rule.max, 1, 99),
       source: "rule"
     };
@@ -541,13 +764,13 @@ function getChargeConfig(item) {
 function detectChargeConfigFromFrequency(frequencyText) {
   const text = String(frequencyText ?? "").trim();
   if (!text) return null;
-  if (/\b(at[-\s]?will|eot|static)\b/i.test(text)) return null;
+  if (/\b(at[-\s]?will|eot|static|special)\b/i.test(text)) return null;
 
   const kind = normalizeFrequency(text);
   if (!kind) return null;
 
-  const countMatch = /\b(?:scene|daily)\b\s*(?:x|times|\*)?\s*(\d+)\b/i.exec(text)
-    ?? /\bx\s*(\d+)\b/i.exec(text)
+  const countMatch = /\b(?:scene|daily)\b\s*(?:x|\u00d7|times|\*)?\s*(\d+)\b/i.exec(text)
+    ?? /\b(?:x|\u00d7)\s*(\d+)\b/i.exec(text)
     ?? /\b(\d+)\s*(?:\/|\s+per\s+)?\s*(?:scene|daily)\b/i.exec(text);
 
   return {
@@ -562,6 +785,14 @@ function normalizeFrequency(value) {
   const text = String(value ?? "").toLowerCase();
   if (/\bscene\b/.test(text)) return "scene";
   if (/\bdaily\b/.test(text)) return "daily";
+  return null;
+}
+
+function normalizeReset(value) {
+  const text = String(value ?? "").toLowerCase();
+  if (/\bscene\b/.test(text)) return "scene";
+  if (/\bdaily\b/.test(text)) return "daily";
+  if (/\bextended[-\s]?rest\b|\bextendedrest\b|\blong[-\s]?rest\b/.test(text)) return "extendedRest";
   return null;
 }
 
@@ -598,6 +829,35 @@ async function consumeCharge(item, amount = 1, { notify = false } = {}) {
   return true;
 }
 
+async function adjustCharge(item, delta) {
+  const state = getChargeState(item);
+  if (!state || !item?.isOwner) return false;
+  const remaining = clampInt(state.remaining + delta, 0, state.max);
+  await item.setFlag(MODULE_ID, CHARGE_FLAG, {
+    remaining,
+    max: state.max,
+    frequency: state.frequency,
+    reset: state.reset,
+    signature: state.signature
+  });
+  item.actor?.sheet?.render(false);
+  return true;
+}
+
+async function resetItemCharge(item) {
+  const state = getChargeState(item);
+  if (!state || !item?.isOwner) return false;
+  await item.setFlag(MODULE_ID, CHARGE_FLAG, {
+    remaining: state.max,
+    max: state.max,
+    frequency: state.frequency,
+    reset: state.reset,
+    signature: state.signature
+  });
+  item.actor?.sheet?.render(false);
+  return true;
+}
+
 function notifyNoCharges(item, state) {
   if (!state) return;
   ui.notifications.warn(format("PTR_AP.Notify.NoCharges", {
@@ -608,7 +868,8 @@ function notifyNoCharges(item, state) {
 
 async function resetActorCharges(actor, resetType = "scene", { notify = false } = {}) {
   if (!actor?.isOwner) return 0;
-  const resetTypes = resetType === "daily" ? new Set(["scene", "daily"]) : new Set(["scene"]);
+  const isFullReset = resetType === "daily" || resetType === "extendedRest";
+  const resetTypes = isFullReset ? new Set(["scene", "daily", "extendedRest"]) : new Set(["scene"]);
   let count = 0;
 
   for (const item of actor.items?.contents ?? []) {
@@ -625,16 +886,33 @@ async function resetActorCharges(actor, resetType = "scene", { notify = false } 
     count += 1;
   }
 
+  if (isFullReset) count += await clearActorDrainStates(actor);
+
   if (notify) {
     ui.notifications.info(format("PTR_AP.Notify.Reset", { name: actor.name, count }, `${actor.name}: ${count} charge pool(s) reset.`));
   }
   return count;
 }
 
+async function clearActorDrainStates(actor) {
+  let count = 0;
+  for (const item of actor.items?.contents ?? []) {
+    const config = getManualApConfig(item);
+    const state = getManualApState(item, config);
+    if (!state.drainActive) continue;
+
+    state.drainActive = false;
+    await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
+    count += 1;
+  }
+  queueActorApClamp(actor);
+  return count;
+}
+
 async function resetCombatantCharges(combat, resetType) {
   const actors = new Set((combat?.combatants?.contents ?? Array.from(combat?.combatants ?? []))
     .map((combatant) => combatant.actor)
-    .filter((actor) => actor?.type === "character"));
+    .filter((actor) => isSupportedActor(actor)));
 
   for (const actor of actors) {
     await resetActorCharges(actor, resetType);
@@ -643,12 +921,12 @@ async function resetCombatantCharges(combat, resetType) {
 
 function refreshActorApAfterItemChange(item) {
   const actor = item?.actor;
-  if (!actor || actor.type !== "character" || !actor.isOwner || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
+  if (!actor || !hasApResource(actor) || !actor.isOwner || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
   queueActorApClamp(actor);
 }
 
 function queueActorApClamp(actor, preparedAp = null) {
-  if (!actor || actor.type !== "character" || !actor.isOwner || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
+  if (!actor || !hasApResource(actor) || !actor.isOwner || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
   window.setTimeout(() => {
     const ap = preparedAp ?? getActorApData(actor);
     if (Number(actor.system?.ap?.value ?? 0) <= ap.usableMax) return;
@@ -657,7 +935,7 @@ function queueActorApClamp(actor, preparedAp = null) {
 }
 
 async function spendAP(actor, amount = 1, { notify = true } = {}) {
-  if (!actor?.isOwner || actor.type !== "character") return false;
+  if (!actor?.isOwner || !hasApResource(actor)) return false;
   const cost = clampInt(amount, 0, 999);
   const ap = getActorApData(actor);
   if (cost > ap.available) {
@@ -675,6 +953,20 @@ function getItemFromRow(actor, row) {
   const id = row?.dataset?.itemId;
   if (!id) return null;
   return actor.items.get(id) ?? actor.attacks?.get(id)?.item ?? null;
+}
+
+function getItemFromAction(actor, button) {
+  const id = button?.dataset?.itemId ?? button?.closest?.("[data-item-id]")?.dataset?.itemId;
+  if (!id) return null;
+  return actor.items.get(id) ?? actor.attacks?.get(id)?.item ?? null;
+}
+
+function isSupportedActor(actor) {
+  return !!actor && ["character", "pokemon"].includes(actor.type);
+}
+
+function hasApResource(actor) {
+  return isSupportedActor(actor) && actor.system?.ap && actor.system.ap.value !== undefined && actor.system.ap.max !== undefined;
 }
 
 function normalizeKeywords(keywords) {
@@ -703,6 +995,11 @@ function isPrimaryGM() {
 
 function getFrequencyLabel(frequency) {
   const data = CHARGE_FREQUENCIES[frequency] ?? CHARGE_FREQUENCIES.scene;
+  return label(data.labelKey, data.fallback);
+}
+
+function getResetLabel(reset) {
+  const data = RESET_TYPES[reset] ?? RESET_TYPES.scene;
   return label(data.labelKey, data.fallback);
 }
 
@@ -738,7 +1035,12 @@ function exposeApi() {
     getActorApData,
     getChargeConfig,
     getChargeState,
+    getManualApConfig,
+    getManualApState,
+    toggleManualApState,
     consumeCharge,
+    adjustCharge,
+    resetItemCharge,
     spendAP,
     resetActorCharges,
     detectChargeConfigFromFrequency

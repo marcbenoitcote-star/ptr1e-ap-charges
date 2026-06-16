@@ -1,0 +1,20 @@
+{
+  "PTR_AP.Settings.AutoDetect.Name": "Auto-detect charge frequencies",
+  "PTR_AP.Settings.AutoDetect.Hint": "Automatically creates charge tracking from item frequency text such as Scene x2, Daily x3, Scene, or Daily.",
+  "PTR_AP.Settings.ClampAp.Name": "Clamp unusable AP",
+  "PTR_AP.Settings.ClampAp.Hint": "Warns and clamps Action Points when an update would exceed the usable AP after Bind and Drain.",
+  "PTR_AP.BindDrain": "Bind: {bind} | Drain: {drain}",
+  "PTR_AP.Tooltip": "Available: {available} / Bind: {bind} / Drain: {drain} / Maximum: {maximum}",
+  "PTR_AP.ResetScene": "Reset Scene",
+  "PTR_AP.ResetDaily": "Reset Daily",
+  "PTR_AP.Scene": "Scene",
+  "PTR_AP.Daily": "Daily",
+  "PTR_AP.Notify.ApClamped": "{name} can only use {usable} AP after Bind and Drain.",
+  "PTR_AP.Notify.NoCharges": "{item} has no {frequency} charges remaining.",
+  "PTR_AP.Notify.ChargeUsed": "{item}: {remaining}/{max} {frequency} remaining.",
+  "PTR_AP.Notify.Reset": "{name}: {count} charge pool(s) reset.",
+  "PTR_AP.Rule.Frequency": "Frequency",
+  "PTR_AP.Rule.Max": "Max Charges",
+  "PTR_AP.Rule.Reset": "Reset",
+  "RULES.Types.PTUCharge": "PTU Charge"
+}

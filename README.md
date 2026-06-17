@@ -7,6 +7,13 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
 - Replaces the Trainer sheet AP range with a segmented AP meter.
 - Detects AP text such as `AP-Bind-2`, `AP-Drain-1`, `Bind 2 AP`, and `Drain 1 AP` on owned Items, Features, Edges, Moves, Abilities, and Effects.
 - Adds row buttons to activate/deactivate AP Bind and apply/remove AP Drain when those costs are found.
+- Adds manual Actor AP controls for emergency corrections:
+  - Bind AP `-`, numeric value, and `+`.
+  - Drain AP `-`, numeric value, and `+`.
+  - Reset manual Bind, manual Drain, or both.
+  - Full `New Day` AP reset with confirmation.
+  - GM-only selected-token full reset button.
+- Optional chat logging for manual AP changes.
 - Also respects PTR1e native `ActionPoint` Rule Elements when present.
 - AP segment colors:
   - Green: currently available AP.
@@ -34,6 +41,7 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
 - Resets Scene charges when a combat encounter is deleted by the primary active GM.
 - Adds manual `Scene` and `Daily / Extended Rest` reset buttons on supported Actor sheets.
 - `Daily / Extended Rest` reset also resets Scene charges and removes active AP Drain states.
+- `New Day` reset restores current AP to the usable maximum, clears module-managed Bind/Drain states, and resets Scene/Daily/Extended Rest charges.
 - Optional frequency auto-detection:
   - `Scene`
   - `Scene x2`
@@ -42,7 +50,7 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
   - `Scene x2` using the multiplication sign
   - `Daily`
   - `Daily x3`
-- `Daily x5`
+  - `Daily x5`
 - `At-Will`, `EOT`, `Static`, and `Special` do not create charge pools from auto-detection.
 
 ## Storage
@@ -57,6 +65,12 @@ Manual AP Bind/Drain state is also stored on the owned Item:
 
 ```text
 flags.ptr1e-ap-charges.apState
+```
+
+Manual Actor AP corrections are stored on the Actor:
+
+```text
+flags.ptr1e-ap-charges.actorApState
 ```
 
 The module uses flags instead of adding custom system fields, keeping it separate from PTR1e schema migrations.
@@ -87,11 +101,12 @@ The GitHub repository and release assets must be public so Forge and Foundry can
 2. Check the AP section on Trainer sheets and the item rows on Trainer/Pokemon sheets.
 3. Add AP text such as `AP-Bind-2`, `AP-Drain-1`, `Bind 2 AP`, or `Drain 1 AP` to active Items, Features, Edges, Moves, Abilities, or Effects.
 4. Use the row button to activate Bind or apply Drain.
-5. To manually define charges, open an Item sheet, go to Rules, add `PTUCharge`, and set Frequency, Max Charges, and Reset.
-6. If auto-detection is enabled, charge controls are created from item frequency text such as `Scene x2` or `Daily x3`.
-7. Click a charged Feature, Edge, or Move from the Actor sheet. Its charge count decreases automatically when PTR1e uses the item/attack.
-8. Use the row charge buttons to manually spend, increase, decrease, or reset an item.
-9. Use the `Scene` or `Daily` buttons on the Actor sheet to reset charges manually.
+5. Use the Manual AP panel on a Trainer sheet to add or remove manual Bind/Drain without editing an Item.
+6. To manually define charges, open an Item sheet, go to Rules, add `PTUCharge`, and set Frequency, Max Charges, and Reset.
+7. If auto-detection is enabled, charge controls are created from item frequency text such as `Scene x2` or `Daily x3`.
+8. Click a charged Feature, Edge, or Move from the Actor sheet. Its charge count decreases automatically when PTR1e uses the item/attack.
+9. Use the row charge buttons to manually spend, increase, decrease, or reset an item.
+10. Use the `Scene`, `Daily`, or `New Day` buttons on the Actor sheet to reset charges and AP state manually.
 
 ## Test Checklist
 
@@ -108,6 +123,20 @@ The GitHub repository and release assets must be public so Forge and Foundry can
 - `Drain 1 AP` on an active item shows an Apply Drain button.
 - Clicking Apply Drain adds 1 Drain and changes the AP meter red.
 - Clicking Remove Drain clears that Drain.
+- The Manual AP panel can add `+1` or remove `-1` manual Bind AP.
+- The Manual AP panel can add `+1` or remove `-1` manual Drain AP.
+- Manual Bind/Drain numeric fields can be edited directly.
+- Manual values never go below 0.
+- Non-GM users cannot set manual Bind/Drain above the Actor AP maximum.
+- A GM can force a higher value by typing it directly, or by holding Shift while clicking `+`.
+- Reset Bind clears manual Actor Bind AP.
+- Reset Drain clears manual Actor Drain AP.
+- Reset Both clears both manual Actor values.
+- New Day asks for confirmation before applying.
+- New Day restores current AP to the usable maximum after clearing module-managed Bind/Drain states.
+- New Day resets Daily, Scene, and Extended Rest charge pools.
+- The selected-token full reset button affects selected owned tokens instead of the open sheet Actor.
+- When the chat logging setting is enabled, manual AP changes create chat messages.
 - Daily / Extended Rest reset clears active Drain states.
 - Disabling an item removes its AP controls and contribution.
 - A native PTR1e `ActionPoint` Rule Element still contributes to the meter.

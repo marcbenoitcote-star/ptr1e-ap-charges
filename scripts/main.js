@@ -1,12 +1,14 @@
 const MODULE_ID = "ptr1e-ap-charges";
 const CHARGE_FLAG = "chargeState";
 const AP_STATE_FLAG = "apState";
+const ACTOR_AP_FLAG = "actorApState";
 const PATCHED = Symbol("ptr1eApChargesPatched");
 const ATTACK_PATCHED = Symbol("ptr1eApChargesAttackPatched");
 
 const SETTINGS = {
   autoDetect: "autoDetectFrequency",
-  clampAp: "clampAp"
+  clampAp: "clampAp",
+  chatApChanges: "chatApChanges"
 };
 
 const CHARGE_FREQUENCIES = {
@@ -98,6 +100,15 @@ function registerSettings() {
     type: Boolean,
     default: true
   });
+
+  game.settings.register(MODULE_ID, SETTINGS.chatApChanges, {
+    name: "PTR_AP.Settings.ChatApChanges.Name",
+    hint: "PTR_AP.Settings.ChatApChanges.Hint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false
+  });
 }
 
 function registerChargeRuleElement() {
@@ -135,7 +146,7 @@ async function enhanceActorSheet(app, html) {
 }
 
 function injectApMeter(actor, root) {
-  root.querySelectorAll(".ptr-ap-meter, .ptr-ap-charge-controls").forEach((element) => element.remove());
+  root.querySelectorAll(".ptr-ap-meter, .ptr-ap-manual-controls, .ptr-ap-charge-controls").forEach((element) => element.remove());
   const ap = getActorApData(actor);
   const tooltip = format("PTR_AP.Tooltip", ap, `Available: ${ap.available} / Bind: ${ap.bind} / Drain: ${ap.drain} / Maximum: ${ap.maximum}`);
 
@@ -156,6 +167,7 @@ function injectApMeter(actor, root) {
     input.title = tooltip;
   }
 
+  injectManualApControls(actor, root);
   injectResetControls(actor, root);
 
   queueActorApClamp(actor, ap);
@@ -192,6 +204,67 @@ function getApSegmentClass(index, ap) {
   return "drain";
 }
 
+function injectManualApControls(actor, root) {
+  root.querySelectorAll(".ptr-ap-manual-controls").forEach((element) => element.remove());
+  if (!actor.isOwner || !hasApResource(actor)) return;
+
+  const apBody = root.querySelector(".ap-range")?.closest(".swsh-box")?.querySelector(".swsh-body");
+  if (apBody) apBody.insertAdjacentElement("beforeend", renderManualApControls(actor));
+}
+
+function renderManualApControls(actor) {
+  const state = getActorManualApState(actor);
+  const limit = getActorManualApLimit(actor, game.user?.isGM);
+  const wrapper = document.createElement("div");
+  wrapper.className = "ptr-ap-manual-controls";
+
+  const title = document.createElement("div");
+  title.className = "ptr-ap-manual-title";
+  title.textContent = label("PTR_AP.Manual.Title", "Manual AP");
+
+  const rows = document.createElement("div");
+  rows.className = "ptr-ap-manual-rows";
+  rows.append(
+    renderManualApRow("bind", state.bind, limit, label("PTR_AP.BindAP", "Bind AP")),
+    renderManualApRow("drain", state.drain, limit, label("PTR_AP.DrainAP", "Drain AP"))
+  );
+
+  const resetRow = document.createElement("div");
+  resetRow.className = "ptr-ap-manual-resets";
+  resetRow.append(
+    renderTextButton("manual-bind-reset", "", label("PTR_AP.ResetBindAP", "Reset Bind"), ""),
+    renderTextButton("manual-drain-reset", "", label("PTR_AP.ResetDrainAP", "Reset Drain"), ""),
+    renderTextButton("manual-both-reset", "", label("PTR_AP.ResetBindDrainAP", "Reset Bind + Drain"), "")
+  );
+
+  wrapper.append(title, rows, resetRow);
+  return wrapper;
+}
+
+function renderManualApRow(kind, value, limit, labelText) {
+  const row = document.createElement("div");
+  row.className = `ptr-ap-manual-row ${kind}`;
+
+  const labelElement = document.createElement("label");
+  labelElement.textContent = labelText;
+
+  const minus = renderIconButton(`manual-${kind}-decrease`, "", "fa-minus", label("PTR_AP.DecreaseManualAP", "Decrease manual AP"));
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = 0;
+  input.max = limit;
+  input.step = 1;
+  input.value = value;
+  input.dataset.ptrApManualField = kind;
+  input.title = label("PTR_AP.SetManualAP", "Set manual AP");
+
+  const plus = renderIconButton(`manual-${kind}-increase`, "", "fa-plus", label("PTR_AP.IncreaseManualAP", "Increase manual AP"));
+
+  row.append(labelElement, minus, input, plus);
+  return row;
+}
+
 function injectResetControls(actor, root) {
   root.querySelectorAll(".ptr-ap-charge-controls").forEach((element) => element.remove());
   if (!actor.isOwner) return;
@@ -222,7 +295,23 @@ function renderResetControls(extraClass = "") {
   daily.title = label("PTR_AP.ResetDaily", "Reset Daily / Extended Rest");
   daily.innerHTML = `<i class="fas fa-bed"></i> <span>${escapeHtml(label("PTR_AP.Daily", "Daily"))}</span>`;
 
-  controls.append(scene, daily);
+  const full = document.createElement("button");
+  full.type = "button";
+  full.dataset.ptrApAction = "reset-full";
+  full.title = label("PTR_AP.FullReset", "New Day / Full AP Reset");
+  full.innerHTML = `<i class="fas fa-sun"></i> <span>${escapeHtml(label("PTR_AP.NewDay", "New Day"))}</span>`;
+
+  controls.append(scene, daily, full);
+
+  if (game.user?.isGM) {
+    const selected = document.createElement("button");
+    selected.type = "button";
+    selected.dataset.ptrApAction = "reset-selected-full";
+    selected.title = label("PTR_AP.FullResetSelected", "Full AP reset for selected tokens");
+    selected.innerHTML = `<i class="fas fa-users"></i> <span>${escapeHtml(label("PTR_AP.SelectedTokens", "Selected"))}</span>`;
+    controls.append(selected);
+  }
+
   return controls;
 }
 
@@ -308,8 +397,10 @@ function renderTextButton(action, itemId, labelText, detail) {
   button.type = "button";
   button.dataset.ptrApAction = action;
   button.dataset.itemId = itemId;
-  button.title = `${labelText} (${detail})`;
-  button.innerHTML = `<span>${escapeHtml(labelText)}</span><small>${escapeHtml(detail)}</small>`;
+  button.title = detail ? `${labelText} (${detail})` : labelText;
+  button.innerHTML = detail
+    ? `<span>${escapeHtml(labelText)}</span><small>${escapeHtml(detail)}</small>`
+    : `<span>${escapeHtml(labelText)}</span>`;
   return button;
 }
 
@@ -322,13 +413,22 @@ function bindActorSheetControls(actor, root) {
     if (actionButton) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      handleActorActionClick(actor, actionButton).catch((error) => warn("actor-action", error));
+      handleActorActionClick(actor, actionButton, event).catch((error) => warn("actor-action", error));
       return;
     }
   }, true);
 
   root.addEventListener("change", (event) => {
     const input = event.target;
+    const manualField = input?.dataset?.ptrApManualField;
+    if (manualField) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setActorManualAp(actor, manualField, input.value, { force: game.user?.isGM, notify: true })
+        .catch((error) => warn("manual-ap-input", error));
+      return;
+    }
+
     if (!input?.matches?.('.ap-range, input[name="system.ap.value"], input[name="system.ap.value input"]')) return;
     const ap = getActorApData(actor);
     const next = clampInt(input.value, 0, 999);
@@ -342,11 +442,41 @@ function bindActorSheetControls(actor, root) {
   }, true);
 }
 
-async function handleActorActionClick(actor, button) {
+async function handleActorActionClick(actor, button, event = null) {
   const action = button.dataset.ptrApAction;
   if (action === "reset-scene" || action === "reset-daily") {
     const resetType = action === "reset-daily" ? "daily" : "scene";
     await resetActorCharges(actor, resetType, { notify: true });
+    return;
+  }
+
+  if (action === "reset-full") {
+    if (await confirmFullApReset([actor])) {
+      await resetActorFullAp(actor, { notify: true });
+    }
+    return;
+  }
+
+  if (action === "reset-selected-full") {
+    const actors = getSelectedTokenActors();
+    if (actors.length === 0) {
+      ui.notifications.warn(label("PTR_AP.Notify.NoSelectedTokens", "No selected owned tokens to reset."));
+      return;
+    }
+    if (await confirmFullApReset(actors)) {
+      for (const selectedActor of actors) {
+        await resetActorFullAp(selectedActor, { notify: true });
+      }
+    }
+    return;
+  }
+
+  const manualMatch = /^manual-(bind|drain|both)-(increase|decrease|reset)$/.exec(action);
+  if (manualMatch) {
+    const [, kind, operation] = manualMatch;
+    const force = game.user?.isGM && !!event?.shiftKey;
+    if (operation === "reset") await resetActorManualAp(actor, kind, { notify: true });
+    else await adjustActorManualAp(actor, kind, operation === "increase" ? 1 : -1, { force, notify: true });
     return;
   }
 
@@ -543,9 +673,10 @@ function getActorApData(actor) {
   const nativeBind = clampInt(actor.system?.ap?.bound, 0, 999);
   const nativeDrain = clampInt(actor.system?.ap?.drained, 0, 999);
   const itemAp = getItemApAdjustments(actor);
+  const manualAp = getActorManualApState(actor);
 
-  const bind = Math.max(nativeBind, itemAp.bind);
-  const drain = Math.max(nativeDrain, itemAp.drain);
+  const bind = Math.max(nativeBind, itemAp.bind) + manualAp.bind;
+  const drain = Math.max(nativeDrain, itemAp.drain) + manualAp.drain;
   const maximum = Math.max(nativeUsableMax + nativeBind + nativeDrain, nativeUsableMax);
   const usableMax = Math.max(0, maximum - bind - drain);
   const available = clampInt(actor.system?.ap?.value, 0, usableMax);
@@ -558,6 +689,77 @@ function getActorApData(actor) {
     usableMax,
     spent: Math.max(0, usableMax - available)
   };
+}
+
+function getActorManualApState(actor) {
+  const stored = actor?.getFlag?.(MODULE_ID, ACTOR_AP_FLAG) ?? {};
+  return {
+    bind: clampInt(stored.bind, 0, 999),
+    drain: clampInt(stored.drain, 0, 999)
+  };
+}
+
+function getActorApMaximum(actor) {
+  const nativeUsableMax = clampInt(actor.system?.ap?.max, 0, 999);
+  const nativeBind = clampInt(actor.system?.ap?.bound, 0, 999);
+  const nativeDrain = clampInt(actor.system?.ap?.drained, 0, 999);
+  return Math.max(nativeUsableMax + nativeBind + nativeDrain, nativeUsableMax);
+}
+
+function getActorManualApLimit(actor, force = false) {
+  return force && game.user?.isGM ? 999 : getActorApMaximum(actor);
+}
+
+async function adjustActorManualAp(actor, kind, delta, { force = false, notify = false } = {}) {
+  if (!actor?.isOwner || !["bind", "drain"].includes(kind)) return false;
+  const state = getActorManualApState(actor);
+  const next = state[kind] + clampInt(delta, -999, 999);
+  return setActorManualAp(actor, kind, next, { force, notify, delta });
+}
+
+async function setActorManualAp(actor, kind, value, { force = false, notify = false, delta = null } = {}) {
+  if (!actor?.isOwner || !["bind", "drain"].includes(kind)) return false;
+  const state = getActorManualApState(actor);
+  const limit = getActorManualApLimit(actor, force);
+  const previous = state[kind];
+  state[kind] = clampInt(value, 0, limit);
+  await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, state);
+  queueActorApClamp(actor);
+  actor.sheet?.render(false);
+
+  if (notify && previous !== state[kind]) {
+    const change = delta === null ? state[kind] - previous : state[kind] - previous;
+    const changeLabel = change >= 0 ? `+${change}` : String(change);
+    const kindLabel = getApKindLabel(kind);
+    await notifyApChange(actor, "PTR_AP.Notify.ManualAdjust", {
+      name: actor.name,
+      change: changeLabel,
+      kind: kindLabel,
+      value: state[kind]
+    }, `${actor.name}: ${changeLabel} ${kindLabel} AP applied manually.`, { chat: true });
+  }
+  return true;
+}
+
+async function resetActorManualAp(actor, kind = "both", { notify = false } = {}) {
+  if (!actor?.isOwner) return false;
+  const state = getActorManualApState(actor);
+  const resetBind = kind === "bind" || kind === "both";
+  const resetDrain = kind === "drain" || kind === "both";
+  if (resetBind) state.bind = 0;
+  if (resetDrain) state.drain = 0;
+  await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, state);
+  queueActorApClamp(actor);
+  actor.sheet?.render(false);
+
+  if (notify) {
+    const kindLabel = kind === "both" ? label("PTR_AP.BindDrainLabel", "Bind + Drain") : getApKindLabel(kind);
+    await notifyApChange(actor, "PTR_AP.Notify.ManualReset", {
+      name: actor.name,
+      kind: kindLabel
+    }, `${actor.name}: manual ${kindLabel} AP reset.`, { chat: true });
+  }
+  return true;
 }
 
 function getItemApAdjustments(actor) {
@@ -894,19 +1096,106 @@ async function resetActorCharges(actor, resetType = "scene", { notify = false } 
   return count;
 }
 
-async function clearActorDrainStates(actor) {
-  let count = 0;
-  for (const item of actor.items?.contents ?? []) {
-    const config = getManualApConfig(item);
-    const state = getManualApState(item, config);
-    if (!state.drainActive) continue;
+async function resetActorFullAp(actor, { notify = false } = {}) {
+  if (!actor?.isOwner || !hasApResource(actor)) return false;
+  await resetActorCharges(actor, "extendedRest");
+  await clearActorBindStates(actor);
+  await resetActorManualAp(actor, "both");
 
-    state.drainActive = false;
-    await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
+  const ap = getActorApData(actor);
+  await actor.update({ "system.ap.value": ap.usableMax });
+  actor.sheet?.render(false);
+
+  if (notify) {
+    await notifyApChange(actor, "PTR_AP.Notify.FullReset", {
+      name: actor.name,
+      ap: ap.usableMax
+    }, `${actor.name}: full AP reset completed.`, { chat: true });
+  }
+  return true;
+}
+
+async function clearActorDrainStates(actor) {
+  let count = await clearActorItemApStates(actor, "drain");
+  const actorState = getActorManualApState(actor);
+  if (actorState.drain > 0) {
+    actorState.drain = 0;
+    await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, actorState);
     count += 1;
   }
   queueActorApClamp(actor);
   return count;
+}
+
+async function clearActorBindStates(actor) {
+  let count = await clearActorItemApStates(actor, "bind");
+  const actorState = getActorManualApState(actor);
+  if (actorState.bind > 0) {
+    actorState.bind = 0;
+    await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, actorState);
+    count += 1;
+  }
+  queueActorApClamp(actor);
+  return count;
+}
+
+async function clearActorItemApStates(actor, kind) {
+  let count = 0;
+  for (const item of actor.items?.contents ?? []) {
+    const config = getManualApConfig(item);
+    const state = getManualApState(item, config);
+    const shouldClearBind = kind === "bind" || kind === "both";
+    const shouldClearDrain = kind === "drain" || kind === "both";
+    if ((shouldClearBind && state.bindActive) || (shouldClearDrain && state.drainActive)) {
+      if (shouldClearBind) state.bindActive = false;
+      if (shouldClearDrain) state.drainActive = false;
+      await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
+      count += 1;
+    }
+  }
+  return count;
+}
+
+async function confirmFullApReset(actors) {
+  const names = actors.map((actor) => actor.name).join(", ");
+  const title = label("PTR_AP.Confirm.FullReset.Title", "Confirm Full AP Reset");
+  const message = format("PTR_AP.Confirm.FullReset.Content", { names }, `Reset AP, Bind, Drain, and charges for ${names}?`);
+  const content = `<p>${escapeHtml(message)}</p>`;
+  const confirmLabel = label("PTR_AP.Confirm", "Confirm");
+  const cancelLabel = label("PTR_AP.Cancel", "Cancel");
+
+  const dialogV2 = globalThis.foundry?.applications?.api?.DialogV2;
+  if (dialogV2?.confirm) {
+    return !!(await dialogV2.confirm({
+      window: { title },
+      content,
+      yes: { label: confirmLabel },
+      no: { label: cancelLabel },
+      rejectClose: false
+    }));
+  }
+
+  if (globalThis.Dialog?.confirm) {
+    return !!(await Dialog.confirm({
+      title,
+      content,
+      yes: () => true,
+      no: () => false,
+      defaultYes: false
+    }));
+  }
+
+  return globalThis.window?.confirm ? window.confirm(message) : false;
+}
+
+function getSelectedTokenActors() {
+  const actors = new Map();
+  for (const token of globalThis.canvas?.tokens?.controlled ?? []) {
+    const actor = token.actor;
+    if (!isSupportedActor(actor) || !actor.isOwner) continue;
+    actors.set(actor.uuid ?? actor.id, actor);
+  }
+  return Array.from(actors.values());
 }
 
 async function resetCombatantCharges(combat, resetType) {
@@ -1003,6 +1292,23 @@ function getResetLabel(reset) {
   return label(data.labelKey, data.fallback);
 }
 
+function getApKindLabel(kind) {
+  if (kind === "bind") return label("PTR_AP.Bind", "Bind");
+  if (kind === "drain") return label("PTR_AP.Drain", "Drain");
+  return label("PTR_AP.BindDrainLabel", "Bind + Drain");
+}
+
+async function notifyApChange(actor, key, data, fallback, { chat = false } = {}) {
+  const message = format(key, data, fallback);
+  ui.notifications.info(message);
+
+  if (!chat || !game.settings.get(MODULE_ID, SETTINGS.chatApChanges) || !globalThis.ChatMessage?.create) return;
+  await ChatMessage.create({
+    speaker: ChatMessage.getSpeaker?.({ actor }) ?? { actor: actor.id },
+    content: `<p>${escapeHtml(message)}</p>`
+  });
+}
+
 function label(key, fallback) {
   const value = game.i18n.localize(key);
   return value && value !== key ? value : fallback;
@@ -1021,9 +1327,12 @@ function clampInt(value, min, max) {
 }
 
 function escapeHtml(value) {
-  const div = document.createElement("div");
-  div.textContent = String(value ?? "");
-  return div.innerHTML;
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function warn(scope, error) {
@@ -1033,6 +1342,11 @@ function warn(scope, error) {
 function exposeApi() {
   game.ptrApCharges = {
     getActorApData,
+    getActorManualApState,
+    adjustActorManualAp,
+    setActorManualAp,
+    resetActorManualAp,
+    resetActorFullAp,
     getChargeConfig,
     getChargeState,
     getManualApConfig,

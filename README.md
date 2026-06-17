@@ -7,6 +7,7 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
 - Replaces the Trainer sheet AP range with a segmented AP meter.
 - Detects AP text such as `AP-Bind-2`, `AP-Drain-1`, `Bind 2 AP`, and `Drain 1 AP` on owned Items, Features, Edges, Moves, Abilities, and Effects.
 - Adds row buttons to activate/deactivate AP Bind and apply/remove AP Drain when those costs are found.
+- Stores AP Bind/Drain row state on the Actor instead of updating the owned Item on every AP click, reducing PTR1e Rule Element revalidation churn.
 - Adds manual Actor AP controls for emergency corrections:
   - Temp AP `-`, numeric value, and `+`.
   - Bind AP `-`, numeric value, and `+`.
@@ -16,6 +17,7 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
   - GM-only selected-token full reset button.
 - Optional chat logging for manual AP changes.
 - `New Day` always posts a recovery summary to chat for the open Actor or selected tokens, including old/new HP, Injuries, and AP values.
+- Debounces Actor sheet re-renders after AP/charge controls so repeated clicks do not force immediate render loops.
 - Adds Temporary AP support:
   - Positive Temp AP increases the displayed total usable AP without changing the Actor's base AP value.
   - Negative Temp AP reduces the displayed total usable AP without becoming Bind or Drain.
@@ -84,10 +86,10 @@ Charge state is stored on the owned Item:
 flags.ptr1e-ap-charges.chargeState
 ```
 
-Manual AP Bind/Drain state is also stored on the owned Item:
+Manual AP Bind/Drain row state is stored on the Actor, keyed by owned Item id:
 
 ```text
-flags.ptr1e-ap-charges.apState
+flags.ptr1e-ap-charges.actorItemApStates
 ```
 
 Manual Actor AP corrections are stored on the Actor:
@@ -95,6 +97,8 @@ Manual Actor AP corrections are stored on the Actor:
 ```text
 flags.ptr1e-ap-charges.actorApState
 ```
+
+Older `flags.ptr1e-ap-charges.apState` values on owned Items are still read for compatibility, but new AP Bind/Drain clicks no longer write to the Item.
 
 Temporary AP from Rule Elements is calculated from active owned Items, Features, Moves, Abilities, and Effects and is not stored separately.
 
@@ -152,7 +156,9 @@ The GitHub repository and release assets must be public so Forge and Foundry can
 - `PTUCharge` appears as `Charge Number` in the Rule Element type list.
 - `AP-Bind-2` on an active item shows an Activate Bind button.
 - Clicking Activate Bind adds 2 Bind and changes the AP meter yellow.
+- Clicking Activate Bind stores module state on the Actor and does not update the owned Item document.
 - Clicking Disable Bind removes that Bind.
+- Clicking Disable Bind restores base AP without updating the owned Item document.
 - `Drain 1 AP` on an active item shows an Apply Drain button.
 - Clicking Apply Drain adds 1 Drain and changes the AP meter red.
 - Clicking Remove Drain clears that Drain.

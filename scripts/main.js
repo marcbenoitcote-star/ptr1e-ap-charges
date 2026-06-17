@@ -2,8 +2,11 @@ const MODULE_ID = "ptr1e-ap-charges";
 const CHARGE_FLAG = "chargeState";
 const AP_STATE_FLAG = "apState";
 const ACTOR_AP_FLAG = "actorApState";
+const ACTOR_ITEM_AP_STATE_FLAG = "actorItemApStates";
 const PATCHED = Symbol("ptr1eApChargesPatched");
 const ATTACK_PATCHED = Symbol("ptr1eApChargesAttackPatched");
+const SHEET_RENDER_DEBOUNCE_MS = 150;
+const sheetRenderTimers = new Map();
 
 const SETTINGS = {
   autoDetect: "autoDetectFrequency",
@@ -785,6 +788,48 @@ function getActorManualApState(actor) {
   };
 }
 
+function getActorItemApStates(actor) {
+  return cloneData(actor?.getFlag?.(MODULE_ID, ACTOR_ITEM_AP_STATE_FLAG) ?? {});
+}
+
+function getManualApStateKey(item) {
+  return item?.id ?? item?._id ?? "";
+}
+
+function getStoredManualApState(item) {
+  const actorStates = item?.actor?.getFlag?.(MODULE_ID, ACTOR_ITEM_AP_STATE_FLAG) ?? {};
+  const key = getManualApStateKey(item);
+  if (key && actorStates[key]) return actorStates[key];
+  return item?.getFlag?.(MODULE_ID, AP_STATE_FLAG) ?? {};
+}
+
+async function updateActorManualApState(actor, state, { baseUsableMaxDelta = 0, releasedBind = 0 } = {}) {
+  if (!actor?.isOwner) return false;
+  const updateData = {
+    [getFlagUpdatePath(ACTOR_AP_FLAG)]: state
+  };
+  const adjustedAp = getAdjustedBaseApValue(actor, { baseUsableMaxDelta, releasedBind });
+  if (adjustedAp !== null) updateData["system.ap.value"] = adjustedAp;
+  await actor.update(updateData);
+  return true;
+}
+
+async function updateActorItemApState(item, state, { baseUsableMaxDelta = 0, releasedBind = 0 } = {}) {
+  const actor = item?.actor;
+  const key = getManualApStateKey(item);
+  if (!actor?.isOwner || !key) return false;
+
+  const states = getActorItemApStates(actor);
+  states[key] = state;
+  const updateData = {
+    [getFlagUpdatePath(ACTOR_ITEM_AP_STATE_FLAG)]: states
+  };
+  const adjustedAp = getAdjustedBaseApValue(actor, { baseUsableMaxDelta, releasedBind });
+  if (adjustedAp !== null) updateData["system.ap.value"] = adjustedAp;
+  await actor.update(updateData);
+  return true;
+}
+
 function getActorApMaximum(actor) {
   const nativeUsableMax = clampInt(actor.system?.ap?.max, 0, 999);
   const nativeBind = clampInt(actor.system?.ap?.bound, 0, 999);
@@ -814,14 +859,15 @@ async function setActorManualAp(actor, kind, value, { force = false, notify = fa
   const min = kind === "temp" ? -limit : 0;
   const previous = state[kind];
   state[kind] = clampInt(value, min, limit);
-  await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, state);
-  if (kind === "bind" && previous > state.bind) {
-    await restoreActorApFromReleasedBind(actor, previous - state.bind);
-  }
-  queueActorApClamp(actor);
-  actor.sheet?.render(false);
+  if (previous === state[kind]) return true;
 
-  if (notify && previous !== state[kind]) {
+  const baseUsableMaxDelta = kind === "bind" || kind === "drain" ? previous - state[kind] : 0;
+  const releasedBind = kind === "bind" && baseUsableMaxDelta > 0 ? baseUsableMaxDelta : 0;
+  await updateActorManualApState(actor, state, { baseUsableMaxDelta, releasedBind });
+  queueActorApClamp(actor);
+  queueActorSheetRender(actor);
+
+  if (notify) {
     const change = delta === null ? state[kind] - previous : state[kind] - previous;
     const changeLabel = change >= 0 ? `+${change}` : String(change);
     const kindLabel = getApKindLabel(kind);
@@ -842,13 +888,16 @@ async function resetActorManualAp(actor, kind = "both", { notify = false } = {})
   const resetDrain = kind === "drain" || kind === "both";
   const resetTemp = kind === "temp";
   const releasedBind = resetBind ? state.bind : 0;
+  const previous = { ...state };
   if (resetTemp) state.temp = 0;
   if (resetBind) state.bind = 0;
   if (resetDrain) state.drain = 0;
-  await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, state);
-  if (releasedBind > 0) await restoreActorApFromReleasedBind(actor, releasedBind);
+  if (previous.temp === state.temp && previous.bind === state.bind && previous.drain === state.drain) return true;
+
+  const baseUsableMaxDelta = (previous.bind - state.bind) + (previous.drain - state.drain);
+  await updateActorManualApState(actor, state, { baseUsableMaxDelta, releasedBind });
   queueActorApClamp(actor);
-  actor.sheet?.render(false);
+  queueActorSheetRender(actor);
 
   if (notify) {
     const kindLabel = kind === "both" ? label("PTR_AP.BindDrainLabel", "Bind + Drain") : getApKindLabel(kind);
@@ -927,7 +976,7 @@ function getManualApConfig(item) {
 }
 
 function getManualApState(item, config = getManualApConfig(item)) {
-  const stored = item?.getFlag?.(MODULE_ID, AP_STATE_FLAG) ?? {};
+  const stored = getStoredManualApState(item);
   if (!config || stored.signature !== config.signature) {
     return {
       bindActive: false,
@@ -948,14 +997,24 @@ async function toggleManualApState(item, kind) {
   if (!config || !item?.isOwner) return false;
 
   const state = getManualApState(item, config);
-  const releasedBind = kind === "bind" && state.bindActive && config.bind > 0 ? config.bind : 0;
-  if (kind === "bind" && config.bind > 0) state.bindActive = !state.bindActive;
-  if (kind === "drain" && config.drain > 0) state.drainActive = !state.drainActive;
+  let baseUsableMaxDelta = 0;
+  let releasedBind = 0;
+  const previousBind = state.bindActive;
+  const previousDrain = state.drainActive;
+  if (kind === "bind" && config.bind > 0) {
+    state.bindActive = !state.bindActive;
+    baseUsableMaxDelta = state.bindActive ? -config.bind : config.bind;
+    releasedBind = state.bindActive ? 0 : config.bind;
+  }
+  if (kind === "drain" && config.drain > 0) {
+    state.drainActive = !state.drainActive;
+    baseUsableMaxDelta = state.drainActive ? -config.drain : config.drain;
+  }
+  if (previousBind === state.bindActive && previousDrain === state.drainActive) return false;
 
-  await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
-  if (releasedBind > 0) await restoreActorApFromReleasedBind(item.actor, releasedBind);
+  await updateActorItemApState(item, state, { baseUsableMaxDelta, releasedBind });
   queueActorApClamp(item.actor);
-  item.actor?.sheet?.render(false);
+  queueActorSheetRender(item.actor);
   return true;
 }
 
@@ -1167,7 +1226,7 @@ async function adjustCharge(item, delta) {
     reset: state.reset,
     signature: state.signature
   });
-  item.actor?.sheet?.render(false);
+  queueActorSheetRender(item.actor);
   return true;
 }
 
@@ -1181,7 +1240,7 @@ async function resetItemCharge(item) {
     reset: state.reset,
     signature: state.signature
   });
-  item.actor?.sheet?.render(false);
+  queueActorSheetRender(item.actor);
   return true;
 }
 
@@ -1253,7 +1312,7 @@ async function resetActorFullAp(actor, {
 
   const ap = getActorApData(actor);
   if (restoreAp) await actor.update({ "system.ap.value": ap.baseUsableMax });
-  actor.sheet?.render(false);
+  queueActorSheetRender(actor);
   const after = getActorRecoverySnapshot(actor);
   const summary = {
     actor,
@@ -1294,72 +1353,123 @@ function getActorRecoverySnapshot(actor) {
 }
 
 async function clearActorDrainStates(actor) {
-  let count = await clearActorItemApStates(actor, "drain");
+  const clearedItems = collectClearedActorItemApStates(actor, "drain");
+  let count = clearedItems.count;
+  const updateData = {};
+  if (clearedItems.changed) updateData[getFlagUpdatePath(ACTOR_ITEM_AP_STATE_FLAG)] = clearedItems.states;
+
   const actorState = getActorManualApState(actor);
   if (actorState.drain > 0) {
     actorState.drain = 0;
-    await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, actorState);
+    updateData[getFlagUpdatePath(ACTOR_AP_FLAG)] = actorState;
     count += 1;
   }
+  const adjustedAp = getAdjustedBaseApValue(actor, { baseUsableMaxDelta: clearedItems.baseUsableMaxDelta });
+  if (adjustedAp !== null) updateData["system.ap.value"] = adjustedAp;
+  if (Object.keys(updateData).length > 0) await actor.update(updateData);
   queueActorApClamp(actor);
   return count;
 }
 
 async function clearActorBindStates(actor) {
-  let count = 0;
-  let releasedBind = 0;
-  for (const item of actor.items?.contents ?? []) {
-    const config = getManualApConfig(item);
-    const state = getManualApState(item, config);
-    if (!state.bindActive) continue;
-
-    state.bindActive = false;
-    await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
-    releasedBind += config?.bind ?? 0;
-    count += 1;
-  }
+  const clearedItems = collectClearedActorItemApStates(actor, "bind");
+  let count = clearedItems.count;
+  let releasedBind = clearedItems.releasedBind;
+  const updateData = {};
+  if (clearedItems.changed) updateData[getFlagUpdatePath(ACTOR_ITEM_AP_STATE_FLAG)] = clearedItems.states;
 
   const actorState = getActorManualApState(actor);
   if (actorState.bind > 0) {
     releasedBind += actorState.bind;
+    clearedItems.baseUsableMaxDelta += actorState.bind;
     actorState.bind = 0;
-    await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, actorState);
+    updateData[getFlagUpdatePath(ACTOR_AP_FLAG)] = actorState;
     count += 1;
   }
-  if (releasedBind > 0) await restoreActorApFromReleasedBind(actor, releasedBind);
+  const adjustedAp = getAdjustedBaseApValue(actor, {
+    baseUsableMaxDelta: clearedItems.baseUsableMaxDelta,
+    releasedBind
+  });
+  if (adjustedAp !== null) updateData["system.ap.value"] = adjustedAp;
+  if (Object.keys(updateData).length > 0) await actor.update(updateData);
   queueActorApClamp(actor);
   return count;
 }
 
 async function restoreActorApFromReleasedBind(actor, amount) {
   if (!actor?.isOwner || !hasApResource(actor)) return false;
-  const released = clampInt(amount, 0, 999);
-  if (released <= 0) return false;
-
-  const ap = getActorApData(actor);
-  const current = clampInt(actor.system?.ap?.value, 0, 999);
-  const next = clampInt(current + released, 0, ap.baseUsableMax);
-  if (next === current) return false;
+  const next = getReleasedBindRestoredBaseAp(actor, amount);
+  if (next === null) return false;
 
   await actor.update({ "system.ap.value": next });
   return true;
 }
 
+function getReleasedBindRestoredBaseAp(actor, amount) {
+  const released = clampInt(amount, 0, 999);
+  if (!actor || released <= 0) return null;
+  return getAdjustedBaseApValue(actor, {
+    baseUsableMaxDelta: released,
+    releasedBind: released
+  });
+}
+
+function getAdjustedBaseApValue(actor, { baseUsableMaxDelta = 0, releasedBind = 0 } = {}) {
+  if (!actor) return null;
+  const ap = getActorApData(actor);
+  const current = clampInt(actor.system?.ap?.value, 0, 999);
+  const nextMax = Math.max(0, ap.baseUsableMax + clampInt(baseUsableMaxDelta, -999, 999));
+  const nextStart = current + clampInt(releasedBind, 0, 999);
+  const next = clampInt(nextStart, 0, nextMax);
+  return next === current ? null : next;
+}
+
 async function clearActorItemApStates(actor, kind) {
+  const clearedItems = collectClearedActorItemApStates(actor, kind);
+  if (!clearedItems.changed) return 0;
+  const updateData = {
+    [getFlagUpdatePath(ACTOR_ITEM_AP_STATE_FLAG)]: clearedItems.states
+  };
+  const adjustedAp = getAdjustedBaseApValue(actor, {
+    baseUsableMaxDelta: clearedItems.baseUsableMaxDelta,
+    releasedBind: clearedItems.releasedBind
+  });
+  if (adjustedAp !== null) updateData["system.ap.value"] = adjustedAp;
+  await actor.update(updateData);
+  return clearedItems.count;
+}
+
+function collectClearedActorItemApStates(actor, kind) {
   let count = 0;
+  let releasedBind = 0;
+  let baseUsableMaxDelta = 0;
+  let changed = false;
+  const states = getActorItemApStates(actor);
   for (const item of actor.items?.contents ?? []) {
     const config = getManualApConfig(item);
     const state = getManualApState(item, config);
     const shouldClearBind = kind === "bind" || kind === "both";
     const shouldClearDrain = kind === "drain" || kind === "both";
-    if ((shouldClearBind && state.bindActive) || (shouldClearDrain && state.drainActive)) {
-      if (shouldClearBind) state.bindActive = false;
-      if (shouldClearDrain) state.drainActive = false;
-      await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
-      count += 1;
+    const clearsBind = shouldClearBind && state.bindActive;
+    const clearsDrain = shouldClearDrain && state.drainActive;
+    if (!clearsBind && !clearsDrain) continue;
+
+    if (clearsBind) {
+      state.bindActive = false;
+      releasedBind += config?.bind ?? 0;
+      baseUsableMaxDelta += config?.bind ?? 0;
     }
+    if (clearsDrain) {
+      state.drainActive = false;
+      baseUsableMaxDelta += config?.drain ?? 0;
+    }
+
+    const key = getManualApStateKey(item);
+    if (key) states[key] = state;
+    changed = true;
+    count += 1;
   }
-  return count;
+  return { changed, count, releasedBind, baseUsableMaxDelta, states };
 }
 
 async function applyNewDayRecovery(actor, bandage) {
@@ -1615,6 +1725,22 @@ function refreshActorApAfterItemChange(item) {
   queueActorApClamp(actor);
 }
 
+function queueActorSheetRender(actor) {
+  const sheet = actor?.sheet;
+  if (!sheet?.render) return;
+  const key = actor.uuid ?? actor.id ?? actor.name;
+  if (!key) return;
+
+  const existing = sheetRenderTimers.get(key);
+  if (existing) globalThis.clearTimeout?.(existing);
+
+  const timer = window.setTimeout(() => {
+    sheetRenderTimers.delete(key);
+    sheet.render(false);
+  }, SHEET_RENDER_DEBOUNCE_MS);
+  sheetRenderTimers.set(key, timer);
+}
+
 function queueActorApClamp(actor, preparedAp = null) {
   if (!actor || !hasApResource(actor) || !actor.isOwner || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
   window.setTimeout(() => {
@@ -1720,6 +1846,19 @@ function format(key, data, fallback) {
   const template = game.i18n.localize(key);
   if (!template || template === key) return fallback;
   return game.i18n.format(key, data);
+}
+
+function getFlagUpdatePath(flag) {
+  return `flags.${MODULE_ID}.${flag}`;
+}
+
+function cloneData(value) {
+  if (value === null || value === undefined || typeof value !== "object") return value;
+  try {
+    return structuredClone(value);
+  } catch {
+    return JSON.parse(JSON.stringify(value));
+  }
 }
 
 function clampInt(value, min, max) {

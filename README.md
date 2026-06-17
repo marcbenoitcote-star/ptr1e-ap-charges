@@ -55,6 +55,7 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
 
 - `TemporaryAPBonus` also supports negative values, for example `{ "key": "TemporaryAPBonus", "value": -1 }`.
 - The `PTUCharge` Rule Element is localized as `Charge Number`.
+- `PTUCharge` and `TemporaryAPBonus` now provide a default label when imported Items omit one, preventing PTR1e Rule Element validation errors during world load.
 - Displays charge controls on item rows, for example `1/2 Scene` or `2/3 Daily`.
 - Allows manual charge use, decrease, increase, and reset from the item row.
 - Reduces charges automatically when a charged item is used from the Actor sheet or the chat Use button.

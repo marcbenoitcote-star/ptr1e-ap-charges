@@ -59,6 +59,7 @@ Hooks.on("preUpdateActor", (actor, changes, _options, userId) => {
   if (game.system.id !== "ptu" || !hasApResource(actor) || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
   const nextValue = foundry.utils.getProperty(changes, "system.ap.value");
   if (nextValue === undefined) return;
+  if (foundry.utils.getProperty(changes, getFlagUpdatePath("")) !== undefined) return;
 
   const ap = getActorApData(actor);
   const next = clampInt(nextValue, 0, 999);
@@ -123,6 +124,10 @@ function registerChargeRuleElement() {
   const fields = foundry.data.fields;
   if (!elements.custom.PTUCharge) {
     class PTUChargeRuleElement extends baseClass {
+      constructor(data, item, options = {}) {
+        super(withRuleElementLabel(data, item, label("RULES.Types.PTUCharge", "Charge Number")), item, options);
+      }
+
       static defineSchema() {
         return {
           ...super.defineSchema(),
@@ -138,6 +143,10 @@ function registerChargeRuleElement() {
 
   if (!elements.custom.TemporaryAPBonus) {
     class TemporaryAPBonusRuleElement extends baseClass {
+      constructor(data, item, options = {}) {
+        super(withRuleElementLabel(data, item, label("RULES.Types.TemporaryAPBonus", "Temporary AP Bonus")), item, options);
+      }
+
       static defineSchema() {
         return {
           ...super.defineSchema(),
@@ -1849,7 +1858,15 @@ function format(key, data, fallback) {
 }
 
 function getFlagUpdatePath(flag) {
-  return `flags.${MODULE_ID}.${flag}`;
+  return flag ? `flags.${MODULE_ID}.${flag}` : `flags.${MODULE_ID}`;
+}
+
+function withRuleElementLabel(data, item, fallback) {
+  const source = data ?? {};
+  return {
+    ...source,
+    label: source.label || item?.name || fallback
+  };
 }
 
 function cloneData(value) {

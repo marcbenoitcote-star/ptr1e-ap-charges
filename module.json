@@ -7,10 +7,10 @@
       "name": "Pokemon PTU Custom Server"
     }
   ],
-  "version": "0.4.3",
+  "version": "0.4.4",
   "url": "https://github.com/marcbenoitcote-star/ptr1e-ap-charges",
   "manifest": "https://github.com/marcbenoitcote-star/ptr1e-ap-charges/releases/latest/download/module.json",
-  "download": "https://github.com/marcbenoitcote-star/ptr1e-ap-charges/releases/download/v0.4.3/module.zip",
+  "download": "https://github.com/marcbenoitcote-star/ptr1e-ap-charges/releases/download/v0.4.4/module.zip",
   "compatibility": {
     "minimum": "13.345",
     "verified": "13.350"

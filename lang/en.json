@@ -6,8 +6,8 @@
   "PTR_AP.Settings.ChatApChanges.Name": "Show manual AP changes in chat",
   "PTR_AP.Settings.ChatApChanges.Hint": "Also posts manual AP Bind, Drain, and full reset changes to chat. Interface notifications are always shown.",
   "PTR_AP.BindDrain": "Bind: {bind} | Drain: {drain}",
-  "PTR_AP.TempBindDrain": "Temp AP: {temporaryLabel} | Bind: {bind} | Drain: {drain}",
-  "PTR_AP.Tooltip": "Available: {available} / Temp: {temporaryLabel} / Bind: {bind} / Drain: {drain} / Maximum: {maximum}",
+  "PTR_AP.TempBindDrain": "AP: {baseAvailable} / {baseMaximum} ({temporaryLabel} Temp) | Bind: {bind} | Drain: {drain} | Total usable: {totalAvailable}",
+  "PTR_AP.Tooltip": "Base AP: {baseAvailable} / {baseMaximum} / Temp: {temporaryLabel} / Bind: {bind} / Drain: {drain} / Total usable: {totalAvailable} / {totalUsableMax}",
   "PTR_AP.Manual.Title": "Manual AP",
   "PTR_AP.Temp": "Temp",
   "PTR_AP.Bind": "Bind",
@@ -86,6 +86,8 @@
   "RULE.Type.TemporaryAPBonus": "Temporary AP Bonus",
   "RULES.Types.PTUCharge": "Charge Number",
   "RULES.Types.TemporaryAPBonus": "Temporary AP Bonus",
+  "PTU.RuleElement.PTUCharge": "Charge Number",
+  "PTU.RuleElement.TemporaryAPBonus": "Temporary AP Bonus",
   "RULE": {
     "Type": {
       "PTUCharge": "Charge Number",

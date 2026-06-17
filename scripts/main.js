@@ -59,12 +59,12 @@ Hooks.on("preUpdateActor", (actor, changes, _options, userId) => {
 
   const ap = getActorApData(actor);
   const next = clampInt(nextValue, 0, 999);
-  const clamped = clampInt(next, 0, ap.usableMax);
+  const clamped = clampInt(next, 0, ap.baseUsableMax);
   if (next === clamped) return;
 
   foundry.utils.setProperty(changes, "system.ap.value", clamped);
   if (userId === game.user.id) {
-    ui.notifications.warn(format("PTR_AP.Notify.ApClamped", { name: actor.name, usable: ap.usableMax }, `${actor.name} can only use ${ap.usableMax} AP after Bind and Drain.`));
+    ui.notifications.warn(format("PTR_AP.Notify.ApClamped", { name: actor.name, usable: ap.baseUsableMax }, `${actor.name} can only use ${ap.baseUsableMax} base AP after Bind and Drain.`));
   }
 });
 
@@ -163,12 +163,12 @@ async function enhanceActorSheet(app, html) {
 function injectApMeter(actor, root) {
   root.querySelectorAll(".ptr-ap-meter, .ptr-ap-manual-controls, .ptr-ap-charge-controls").forEach((element) => element.remove());
   const ap = getActorApData(actor);
-  const tooltip = format("PTR_AP.Tooltip", ap, `Available: ${ap.available} / Temp: ${ap.temporaryLabel} / Bind: ${ap.bind} / Drain: ${ap.drain} / Maximum: ${ap.maximum}`);
+  const tooltip = format("PTR_AP.Tooltip", ap, `Base AP: ${ap.baseAvailable} / ${ap.baseMaximum} / Temp: ${ap.temporaryLabel} / Bind: ${ap.bind} / Drain: ${ap.drain} / Total usable: ${ap.totalAvailable} / ${ap.totalUsableMax}`);
 
   for (const range of root.querySelectorAll(".ap-range")) {
     range.classList.add("ptr-ap-native-range");
     range.min = 0;
-    range.max = ap.usableMax;
+    range.max = ap.baseUsableMax;
     range.title = tooltip;
 
     const host = range.closest(".w-100") ?? range.parentElement;
@@ -178,7 +178,7 @@ function injectApMeter(actor, root) {
 
   for (const input of root.querySelectorAll('input[name="system.ap.value"], input[name="system.ap.value input"]')) {
     input.min = 0;
-    input.max = ap.usableMax;
+    input.max = ap.baseUsableMax;
     input.title = tooltip;
   }
 
@@ -206,16 +206,17 @@ function renderApMeter(ap, tooltip) {
 
   const summary = document.createElement("div");
   summary.className = "ptr-ap-summary";
-  summary.textContent = format("PTR_AP.TempBindDrain", ap, `Temp AP: ${ap.temporaryLabel} | Bind: ${ap.bind} | Drain: ${ap.drain}`);
+  summary.textContent = format("PTR_AP.TempBindDrain", ap, `AP: ${ap.baseAvailable} / ${ap.baseMaximum} (${ap.temporaryLabel} Temp) | Bind: ${ap.bind} | Drain: ${ap.drain} | Total usable: ${ap.totalAvailable}`);
 
   wrapper.append(segments, summary);
   return wrapper;
 }
 
 function getApSegmentClass(index, ap) {
-  if (index < ap.available) return ap.temporary > 0 && index >= ap.baseMaximum ? "temporary" : "available";
-  if (index < ap.maximum) return ap.temporary > 0 && index >= ap.baseMaximum ? "temporary spent" : "spent";
-  if (index < ap.maximum + ap.bind) return "bind";
+  if (index < ap.baseAvailable) return "available";
+  if (index < ap.baseUsableMax) return "spent";
+  if (index < ap.baseUsableMax + ap.temporaryAvailable) return "temporary";
+  if (index < ap.baseUsableMax + ap.temporaryAvailable + ap.bind) return "bind";
   return "drain";
 }
 
@@ -448,13 +449,14 @@ function bindActorSheetControls(actor, root) {
     if (!input?.matches?.('.ap-range, input[name="system.ap.value"], input[name="system.ap.value input"]')) return;
     const ap = getActorApData(actor);
     const next = clampInt(input.value, 0, 999);
-    if (next <= ap.usableMax) return;
-
     event.preventDefault();
     event.stopImmediatePropagation();
-    input.value = ap.usableMax;
-    ui.notifications.warn(format("PTR_AP.Notify.ApClamped", { name: actor.name, usable: ap.usableMax }, `${actor.name} can only use ${ap.usableMax} AP after Bind and Drain.`));
-    actor.update({ "system.ap.value": ap.usableMax });
+    const clamped = clampInt(next, 0, ap.baseUsableMax);
+    input.value = clamped;
+    if (next !== clamped) {
+      ui.notifications.warn(format("PTR_AP.Notify.ApClamped", { name: actor.name, usable: ap.baseUsableMax }, `${actor.name} can only use ${ap.baseUsableMax} base AP after Bind and Drain.`));
+    }
+    actor.update({ "system.ap.value": clamped });
   }, true);
 }
 
@@ -749,21 +751,28 @@ function getActorApData(actor) {
   const bind = Math.max(nativeBind, itemAp.bind) + manualAp.bind;
   const drain = Math.max(nativeDrain, itemAp.drain) + manualAp.drain;
   const baseMaximum = Math.max(nativeUsableMax + nativeBind + nativeDrain, nativeUsableMax);
-  const maximum = Math.max(0, baseMaximum + temporary);
-  const usableMax = Math.max(0, maximum - bind - drain);
-  const available = clampInt(actor.system?.ap?.value, 0, usableMax);
+  const baseUsableMax = Math.max(0, baseMaximum - bind - drain);
+  const baseAvailable = clampInt(actor.system?.ap?.value, 0, baseUsableMax);
+  const temporaryAvailable = Math.max(0, temporary);
+  const totalUsableMax = Math.max(0, baseUsableMax + temporary);
+  const totalAvailable = Math.max(0, baseAvailable + temporary);
 
   return {
-    available,
+    available: baseAvailable,
+    baseAvailable,
     baseMaximum,
+    baseUsableMax,
     bind,
     drain,
-    maximum,
+    maximum: totalUsableMax,
     temporary,
+    temporaryAvailable,
     temporaryLabel: `${temporary >= 0 ? "+" : ""}${temporary}`,
-    usableMax,
-    visualMaximum: Math.max(0, maximum + bind + drain),
-    spent: Math.max(0, usableMax - available)
+    totalAvailable,
+    totalUsableMax,
+    usableMax: baseUsableMax,
+    visualMaximum: Math.max(0, baseUsableMax + temporaryAvailable + bind + drain),
+    spent: Math.max(0, baseUsableMax - baseAvailable)
   };
 }
 
@@ -1243,7 +1252,7 @@ async function resetActorFullAp(actor, {
   if (bandage === "bandage" || bandage === "noBandage") await applyNewDayRecovery(actor, bandage);
 
   const ap = getActorApData(actor);
-  if (restoreAp) await actor.update({ "system.ap.value": ap.usableMax });
+  if (restoreAp) await actor.update({ "system.ap.value": ap.baseUsableMax });
   actor.sheet?.render(false);
   const after = getActorRecoverySnapshot(actor);
   const summary = {
@@ -1270,7 +1279,7 @@ async function resetActorFullAp(actor, {
   if (notify) {
     await notifyApChange(actor, "PTR_AP.Notify.FullReset", {
       name: actor.name,
-      ap: restoreAp ? ap.usableMax : ap.available
+      ap: restoreAp ? ap.baseUsableMax : ap.baseAvailable
     }, `${actor.name}: full AP reset completed.`, { chat: false });
   }
   return summary;
@@ -1329,7 +1338,7 @@ async function restoreActorApFromReleasedBind(actor, amount) {
 
   const ap = getActorApData(actor);
   const current = clampInt(actor.system?.ap?.value, 0, 999);
-  const next = clampInt(current + released, 0, ap.usableMax);
+  const next = clampInt(current + released, 0, ap.baseUsableMax);
   if (next === current) return false;
 
   await actor.update({ "system.ap.value": next });
@@ -1610,8 +1619,8 @@ function queueActorApClamp(actor, preparedAp = null) {
   if (!actor || !hasApResource(actor) || !actor.isOwner || !game.settings.get(MODULE_ID, SETTINGS.clampAp)) return;
   window.setTimeout(() => {
     const ap = preparedAp ?? getActorApData(actor);
-    if (Number(actor.system?.ap?.value ?? 0) <= ap.usableMax) return;
-    actor.update({ "system.ap.value": ap.usableMax });
+    if (Number(actor.system?.ap?.value ?? 0) <= ap.baseUsableMax) return;
+    actor.update({ "system.ap.value": ap.baseUsableMax });
   }, 0);
 }
 

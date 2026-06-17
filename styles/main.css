@@ -32,6 +32,14 @@
   background: rgba(72, 78, 86, 0.35);
 }
 
+.ptr-ap-segment.temporary {
+  background: #3f8fe5;
+}
+
+.ptr-ap-segment.temporary.spent {
+  background: rgba(63, 143, 229, 0.48);
+}
+
 .ptr-ap-segment.bind {
   background: #e7bf42;
 }
@@ -250,4 +258,30 @@
 .ptr-ap-rule-form input,
 .ptr-ap-rule-form select {
   width: 100%;
+}
+
+.ptr-ap-new-day-form {
+  display: grid;
+  gap: 8px;
+}
+
+.ptr-ap-new-day-form fieldset {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  border-radius: 4px;
+}
+
+.ptr-ap-new-day-form legend {
+  padding: 0 4px;
+  font-weight: 700;
+}
+
+.ptr-ap-new-day-form label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
 }

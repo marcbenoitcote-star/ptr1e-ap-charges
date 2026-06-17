@@ -285,3 +285,18 @@
   gap: 6px;
   margin: 0;
 }
+
+.ptr-ap-chat-summary {
+  display: grid;
+  gap: 4px;
+}
+
+.ptr-ap-chat-summary h3,
+.ptr-ap-chat-summary p {
+  margin: 0;
+}
+
+.ptr-ap-chat-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}

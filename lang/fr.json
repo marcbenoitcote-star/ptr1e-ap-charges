@@ -29,6 +29,9 @@
   "PTR_AP.SelectedTokens": "Selectionnes",
   "PTR_AP.Confirm": "Confirmer",
   "PTR_AP.Cancel": "Annuler",
+  "PTR_AP.Yes": "Oui",
+  "PTR_AP.No": "Non",
+  "PTR_AP.None": "Aucun",
   "PTR_AP.Confirm.FullReset.Title": "Confirmer le reset complet AP",
   "PTR_AP.Confirm.FullReset.Content": "Choisissez les options de recuperation pour {names}.",
   "PTR_AP.NewDay.Bandage": "Bandage applique ?",
@@ -62,12 +65,37 @@
   "PTR_AP.Notify.ManualReset": "{name}: AP {kind} manuel remis a 0.",
   "PTR_AP.Notify.FullReset": "{name}: reset complet AP effectue. AP actuels restaures a {ap}.",
   "PTR_AP.Notify.NoSelectedTokens": "Aucun token selectionne et autorise a reset.",
+  "PTR_AP.Chat.NewDay.Title": "{name} commence une nouvelle journee.",
+  "PTR_AP.Chat.NewDay.GroupTitle": "New Day applique aux acteurs selectionnes.",
+  "PTR_AP.Chat.Bandage": "Bandage utilise : {value}",
+  "PTR_AP.Chat.HPRecovered": "Points de Vie recuperes : +{value}",
+  "PTR_AP.Chat.HPRecoveredDetail": "Points de Vie recuperes : +{value} ({old} -> {next})",
+  "PTR_AP.Chat.InjuriesHealed": "Injuries retirees : {value}",
+  "PTR_AP.Chat.InjuriesHealedDetail": "Injuries retirees : {value} ({old} -> {next})",
+  "PTR_AP.Chat.APCurrent": "AP actuels : {old} -> {next}",
+  "PTR_AP.Chat.APRestored": "AP restaures au maximum.",
+  "PTR_AP.Chat.BindDrainReset": "Bind AP et Drain AP remis a 0.",
+  "PTR_AP.Chat.BindReset": "Bind AP remis a 0.",
+  "PTR_AP.Chat.DrainReset": "Drain AP remis a 0.",
+  "PTR_AP.Chat.TempReset": "Temp AP manuel remis a 0.",
   "PTR_AP.Rule.Frequency": "Frequence",
   "PTR_AP.Rule.Max": "Charges max",
   "PTR_AP.Rule.Reset": "Reset",
   "PTR_AP.Rule.Value": "Valeur",
   "RULE.Type.PTUCharge": "Charge Number",
-  "RULE.Type.TemporaryAPBonus": "Temporary AP Bonus",
+  "RULE.Type.TemporaryAPBonus": "Bonus d'AP Temporaire",
   "RULES.Types.PTUCharge": "Charge Number",
-  "RULES.Types.TemporaryAPBonus": "Temporary AP Bonus"
+  "RULES.Types.TemporaryAPBonus": "Bonus d'AP Temporaire",
+  "RULE": {
+    "Type": {
+      "PTUCharge": "Charge Number",
+      "TemporaryAPBonus": "Bonus d'AP Temporaire"
+    }
+  },
+  "RULES": {
+    "Types": {
+      "PTUCharge": "Charge Number",
+      "TemporaryAPBonus": "Bonus d'AP Temporaire"
+    }
+  }
 }

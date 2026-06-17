@@ -249,10 +249,8 @@ function renderManualApControls(actor) {
   const resetRow = document.createElement("div");
   resetRow.className = "ptr-ap-manual-resets";
   resetRow.append(
-    renderTextButton("manual-temp-reset", "", label("PTR_AP.ResetTempAP", "Reset Temp"), ""),
     renderTextButton("manual-bind-reset", "", label("PTR_AP.ResetBindAP", "Reset Bind"), ""),
-    renderTextButton("manual-drain-reset", "", label("PTR_AP.ResetDrainAP", "Reset Drain"), ""),
-    renderTextButton("manual-both-reset", "", label("PTR_AP.ResetBindDrainAP", "Reset Bind + Drain"), "")
+    renderTextButton("manual-drain-reset", "", label("PTR_AP.ResetDrainAP", "Reset Drain"), "")
   );
 
   wrapper.append(title, rows, resetRow);
@@ -471,7 +469,8 @@ async function handleActorActionClick(actor, button, event = null) {
   if (action === "reset-full") {
     const options = await promptNewDayOptions([actor]);
     if (options) {
-      await resetActorFullAp(actor, { ...options, notify: true });
+      const summary = await resetActorFullAp(actor, { ...options, notify: true });
+      await createNewDayChatMessage([summary], options);
     }
     return;
   }
@@ -484,9 +483,11 @@ async function handleActorActionClick(actor, button, event = null) {
     }
     const options = await promptNewDayOptions(actors);
     if (options) {
+      const summaries = [];
       for (const selectedActor of actors) {
-        await resetActorFullAp(selectedActor, { ...options, notify: true });
+        summaries.push(await resetActorFullAp(selectedActor, { ...options, notify: true }));
       }
+      await createNewDayChatMessage(summaries, options);
     }
     return;
   }
@@ -805,6 +806,9 @@ async function setActorManualAp(actor, kind, value, { force = false, notify = fa
   const previous = state[kind];
   state[kind] = clampInt(value, min, limit);
   await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, state);
+  if (kind === "bind" && previous > state.bind) {
+    await restoreActorApFromReleasedBind(actor, previous - state.bind);
+  }
   queueActorApClamp(actor);
   actor.sheet?.render(false);
 
@@ -828,10 +832,12 @@ async function resetActorManualAp(actor, kind = "both", { notify = false } = {})
   const resetBind = kind === "bind" || kind === "both";
   const resetDrain = kind === "drain" || kind === "both";
   const resetTemp = kind === "temp";
+  const releasedBind = resetBind ? state.bind : 0;
   if (resetTemp) state.temp = 0;
   if (resetBind) state.bind = 0;
   if (resetDrain) state.drain = 0;
   await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, state);
+  if (releasedBind > 0) await restoreActorApFromReleasedBind(actor, releasedBind);
   queueActorApClamp(actor);
   actor.sheet?.render(false);
 
@@ -933,10 +939,12 @@ async function toggleManualApState(item, kind) {
   if (!config || !item?.isOwner) return false;
 
   const state = getManualApState(item, config);
+  const releasedBind = kind === "bind" && state.bindActive && config.bind > 0 ? config.bind : 0;
   if (kind === "bind" && config.bind > 0) state.bindActive = !state.bindActive;
   if (kind === "drain" && config.drain > 0) state.drainActive = !state.drainActive;
 
   await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
+  if (releasedBind > 0) await restoreActorApFromReleasedBind(item.actor, releasedBind);
   queueActorApClamp(item.actor);
   item.actor?.sheet?.render(false);
   return true;
@@ -1220,6 +1228,7 @@ async function resetActorFullAp(actor, {
   notify = false
 } = {}) {
   if (!actor?.isOwner || !hasApResource(actor)) return false;
+  const before = getActorRecoverySnapshot(actor);
   const resetTypes = new Set();
   if (resetDailyCharges) {
     resetTypes.add("daily");
@@ -1236,14 +1245,43 @@ async function resetActorFullAp(actor, {
   const ap = getActorApData(actor);
   if (restoreAp) await actor.update({ "system.ap.value": ap.usableMax });
   actor.sheet?.render(false);
+  const after = getActorRecoverySnapshot(actor);
+  const summary = {
+    actor,
+    name: actor.name,
+    bandage,
+    hpRecovered: Math.max(0, after.hp - before.hp),
+    injuriesHealed: Math.max(0, before.injuries - after.injuries),
+    oldHp: before.hp,
+    newHp: after.hp,
+    oldInjuries: before.injuries,
+    newInjuries: after.injuries,
+    oldAp: before.ap,
+    newAp: after.ap,
+    apRecovered: Math.max(0, after.ap - before.ap),
+    apRestored: !!restoreAp,
+    resetBind: !!resetBind,
+    resetDrain: !!resetDrain,
+    resetTemp: !!resetTemp,
+    resetDailyCharges: !!resetDailyCharges,
+    resetSceneCharges: !!resetSceneCharges
+  };
 
   if (notify) {
     await notifyApChange(actor, "PTR_AP.Notify.FullReset", {
       name: actor.name,
       ap: restoreAp ? ap.usableMax : ap.available
-    }, `${actor.name}: full AP reset completed.`, { chat: true });
+    }, `${actor.name}: full AP reset completed.`, { chat: false });
   }
-  return true;
+  return summary;
+}
+
+function getActorRecoverySnapshot(actor) {
+  return {
+    ap: clampInt(actor.system?.ap?.value, 0, 999),
+    hp: clampInt(actor.system?.health?.value, 0, 99999),
+    injuries: clampInt(actor.system?.health?.injuries, 0, 999)
+  };
 }
 
 async function clearActorDrainStates(actor) {
@@ -1259,15 +1297,43 @@ async function clearActorDrainStates(actor) {
 }
 
 async function clearActorBindStates(actor) {
-  let count = await clearActorItemApStates(actor, "bind");
+  let count = 0;
+  let releasedBind = 0;
+  for (const item of actor.items?.contents ?? []) {
+    const config = getManualApConfig(item);
+    const state = getManualApState(item, config);
+    if (!state.bindActive) continue;
+
+    state.bindActive = false;
+    await item.setFlag(MODULE_ID, AP_STATE_FLAG, state);
+    releasedBind += config?.bind ?? 0;
+    count += 1;
+  }
+
   const actorState = getActorManualApState(actor);
   if (actorState.bind > 0) {
+    releasedBind += actorState.bind;
     actorState.bind = 0;
     await actor.setFlag(MODULE_ID, ACTOR_AP_FLAG, actorState);
     count += 1;
   }
+  if (releasedBind > 0) await restoreActorApFromReleasedBind(actor, releasedBind);
   queueActorApClamp(actor);
   return count;
+}
+
+async function restoreActorApFromReleasedBind(actor, amount) {
+  if (!actor?.isOwner || !hasApResource(actor)) return false;
+  const released = clampInt(amount, 0, 999);
+  if (released <= 0) return false;
+
+  const ap = getActorApData(actor);
+  const current = clampInt(actor.system?.ap?.value, 0, 999);
+  const next = clampInt(current + released, 0, ap.usableMax);
+  if (next === current) return false;
+
+  await actor.update({ "system.ap.value": next });
+  return true;
 }
 
 async function clearActorItemApStates(actor, kind) {
@@ -1419,6 +1485,80 @@ function readNewDayOptions(html) {
     resetDailyCharges: checked("resetDailyCharges"),
     resetSceneCharges: checked("resetSceneCharges")
   };
+}
+
+async function createNewDayChatMessage(summaries, options = {}) {
+  const validSummaries = summaries.filter(Boolean);
+  if (validSummaries.length === 0 || !globalThis.ChatMessage?.create) return;
+
+  const content = validSummaries.length === 1
+    ? renderSingleNewDayChatContent(validSummaries[0])
+    : renderGroupedNewDayChatContent(validSummaries, options);
+
+  await ChatMessage.create({
+    speaker: validSummaries.length === 1 && ChatMessage.getSpeaker
+      ? ChatMessage.getSpeaker({ actor: validSummaries[0].actor })
+      : undefined,
+    content
+  });
+}
+
+function renderSingleNewDayChatContent(summary) {
+  return `
+    <div class="ptr-ap-chat-summary">
+      <h3>${escapeHtml(format("PTR_AP.Chat.NewDay.Title", { name: summary.name }, `${summary.name} starts a new day.`))}</h3>
+      <p>${escapeHtml(format("PTR_AP.Chat.Bandage", { value: getBandageLabel(summary.bandage) }, `Bandage used: ${getBandageLabel(summary.bandage)}`))}</p>
+      <p>${escapeHtml(format("PTR_AP.Chat.HPRecoveredDetail", { value: summary.hpRecovered, old: summary.oldHp, next: summary.newHp }, `HP recovered: +${summary.hpRecovered} (${summary.oldHp} -> ${summary.newHp})`))}</p>
+      <p>${escapeHtml(format("PTR_AP.Chat.InjuriesHealedDetail", { value: summary.injuriesHealed, old: summary.oldInjuries, next: summary.newInjuries }, `Injuries removed: ${summary.injuriesHealed} (${summary.oldInjuries} -> ${summary.newInjuries})`))}</p>
+      <p>${escapeHtml(format("PTR_AP.Chat.APCurrent", { old: summary.oldAp, next: summary.newAp, value: summary.apRecovered }, `Current AP: ${summary.oldAp} -> ${summary.newAp}`))}</p>
+      <p>${escapeHtml(getNewDayApSummary(summary))}</p>
+    </div>
+  `;
+}
+
+function renderGroupedNewDayChatContent(summaries, options) {
+  const rows = summaries.map((summary) => `
+    <li>
+      <strong>${escapeHtml(summary.name)}</strong> -
+      ${escapeHtml(format("PTR_AP.Chat.Bandage", { value: getBandageLabel(summary.bandage) }, `Bandage used: ${getBandageLabel(summary.bandage)}`))} -
+      ${escapeHtml(format("PTR_AP.Chat.HPRecoveredDetail", { value: summary.hpRecovered, old: summary.oldHp, next: summary.newHp }, `HP recovered: +${summary.hpRecovered} (${summary.oldHp} -> ${summary.newHp})`))} -
+      ${escapeHtml(format("PTR_AP.Chat.InjuriesHealedDetail", { value: summary.injuriesHealed, old: summary.oldInjuries, next: summary.newInjuries }, `Injuries removed: ${summary.injuriesHealed} (${summary.oldInjuries} -> ${summary.newInjuries})`))} -
+      ${escapeHtml(format("PTR_AP.Chat.APCurrent", { old: summary.oldAp, next: summary.newAp, value: summary.apRecovered }, `Current AP: ${summary.oldAp} -> ${summary.newAp}`))}
+    </li>
+  `).join("");
+
+  return `
+    <div class="ptr-ap-chat-summary">
+      <h3>${escapeHtml(label("PTR_AP.Chat.NewDay.GroupTitle", "New Day applied to selected actors."))}</h3>
+      <ul>${rows}</ul>
+      <p>${escapeHtml(getNewDayOptionsSummary(options))}</p>
+    </div>
+  `;
+}
+
+function getBandageLabel(bandage) {
+  if (bandage === "bandage") return label("PTR_AP.Yes", "Yes");
+  if (bandage === "noBandage") return label("PTR_AP.No", "No");
+  return label("PTR_AP.None", "None");
+}
+
+function getNewDayApSummary(summary) {
+  const parts = [];
+  if (summary.apRestored) parts.push(label("PTR_AP.Chat.APRestored", "AP restored to maximum."));
+  if (summary.resetBind && summary.resetDrain) parts.push(label("PTR_AP.Chat.BindDrainReset", "Bind AP and Drain AP reset to 0."));
+  else if (summary.resetBind) parts.push(label("PTR_AP.Chat.BindReset", "Bind AP reset to 0."));
+  else if (summary.resetDrain) parts.push(label("PTR_AP.Chat.DrainReset", "Drain AP reset to 0."));
+  if (summary.resetTemp) parts.push(label("PTR_AP.Chat.TempReset", "Manual Temp AP reset to 0."));
+  return parts.join(" ");
+}
+
+function getNewDayOptionsSummary(options) {
+  return getNewDayApSummary({
+    apRestored: !!options.restoreAp,
+    resetBind: !!options.resetBind,
+    resetDrain: !!options.resetDrain,
+    resetTemp: !!options.resetTemp
+  });
 }
 
 async function confirmFullApReset(actors) {

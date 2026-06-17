@@ -11,13 +11,15 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
   - Temp AP `-`, numeric value, and `+`.
   - Bind AP `-`, numeric value, and `+`.
   - Drain AP `-`, numeric value, and `+`.
-  - Reset manual Bind, manual Drain, or both.
+  - Reset manual Bind or manual Drain.
   - Full `New Day` AP reset with a recovery/options dialog.
   - GM-only selected-token full reset button.
 - Optional chat logging for manual AP changes.
+- `New Day` always posts a recovery summary to chat for the open Actor or selected tokens, including old/new HP, Injuries, and AP values.
 - Adds Temporary AP support:
   - Positive Temp AP increases the effective AP maximum.
   - Negative Temp AP reduces the effective AP maximum.
+  - Temporary AP does not increase Bind or Drain values.
   - Temp AP appears in blue on the AP bar.
 - Also respects PTR1e native `ActionPoint` Rule Elements when present.
 - AP segment colors:
@@ -62,6 +64,7 @@ External Foundry VTT module for Pokemon Tabletop Reunited (`ptu`). It improves A
 - With Bandage: heals 3 Injuries and restores HP to the actor's recalculated maximum.
 - Without Bandage: heals 1 Injury and restores HP equal to 3 natural-healing ticks.
 - `New Day` can reset manual Temporary AP, restore current AP to the usable maximum, and reset Daily/Scene charge pools based on the selected options.
+- Releasing or resetting Bind AP restores those AP to the Actor's current usable AP, up to the effective maximum.
 - Optional frequency auto-detection:
   - `Scene`
   - `Scene x2`
@@ -160,19 +163,24 @@ The GitHub repository and release assets must be public so Forge and Foundry can
 - Non-GM users cannot set manual Bind/Drain above the Actor AP maximum.
 - A GM can force a higher value by typing it directly, or by holding Shift while clicking `+`.
 - Reset Bind clears manual Actor Bind AP.
+- Reset Bind restores the released AP to the Actor, up to the usable maximum.
 - Reset Drain clears manual Actor Drain AP.
-- Reset Both clears both manual Actor values.
+- The separate Reset Temp and Reset Bind + Drain buttons are hidden; use New Day for a full reset.
 - New Day opens a dialog with Bandage, reset, AP restore, Daily charge, and Scene charge options.
 - New Day with Bandage heals 3 Injuries and restores HP to maximum.
 - New Day without Bandage heals 1 Injury and restores 3 natural-healing ticks.
 - New Day can reset manual Temp AP when `Reset Temporary AP` is checked.
+- New Day reapplies active `TemporaryAPBonus` Rule Elements after clearing manual Temp AP.
 - New Day restores current AP to the usable maximum when `Restore AP to Maximum` is checked.
 - New Day resets Daily and Extended Rest charge pools when `Reset Daily Charges` is checked.
 - New Day resets Scene charge pools when `Reset Scene Charges` is checked.
+- New Day creates a chat summary for the open Actor with old/new HP, Injuries, and AP values.
 - The selected-token full reset button affects selected owned tokens instead of the open sheet Actor.
+- The selected-token full reset button creates one grouped chat summary for the selected Actors.
 - When the chat logging setting is enabled, manual AP changes create chat messages.
 - Daily / Extended Rest reset clears active Drain states.
 - Disabling an item removes its AP controls and contribution.
+- Disabling a Bind item restores the released AP to the Actor, up to the usable maximum.
 - A native PTR1e `ActionPoint` Rule Element still contributes to the meter.
 - Entering AP above usable maximum warns and clamps the value.
 - A `PTUCharge` rule with max 2 displays `2/2 Scene` when unused.

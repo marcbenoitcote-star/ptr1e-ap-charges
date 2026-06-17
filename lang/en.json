@@ -29,6 +29,9 @@
   "PTR_AP.SelectedTokens": "Selected",
   "PTR_AP.Confirm": "Confirm",
   "PTR_AP.Cancel": "Cancel",
+  "PTR_AP.Yes": "Yes",
+  "PTR_AP.No": "No",
+  "PTR_AP.None": "None",
   "PTR_AP.Confirm.FullReset.Title": "Confirm Full AP Reset",
   "PTR_AP.Confirm.FullReset.Content": "Choose recovery options for {names}.",
   "PTR_AP.NewDay.Bandage": "Bandage applied?",
@@ -62,6 +65,19 @@
   "PTR_AP.Notify.ManualReset": "{name}: manual {kind} AP reset.",
   "PTR_AP.Notify.FullReset": "{name}: full AP reset completed. Current AP restored to {ap}.",
   "PTR_AP.Notify.NoSelectedTokens": "No selected owned tokens to reset.",
+  "PTR_AP.Chat.NewDay.Title": "{name} starts a new day.",
+  "PTR_AP.Chat.NewDay.GroupTitle": "New Day applied to selected actors.",
+  "PTR_AP.Chat.Bandage": "Bandage used: {value}",
+  "PTR_AP.Chat.HPRecovered": "HP recovered: +{value}",
+  "PTR_AP.Chat.HPRecoveredDetail": "HP recovered: +{value} ({old} -> {next})",
+  "PTR_AP.Chat.InjuriesHealed": "Injuries removed: {value}",
+  "PTR_AP.Chat.InjuriesHealedDetail": "Injuries removed: {value} ({old} -> {next})",
+  "PTR_AP.Chat.APCurrent": "Current AP: {old} -> {next}",
+  "PTR_AP.Chat.APRestored": "AP restored to maximum.",
+  "PTR_AP.Chat.BindDrainReset": "Bind AP and Drain AP reset to 0.",
+  "PTR_AP.Chat.BindReset": "Bind AP reset to 0.",
+  "PTR_AP.Chat.DrainReset": "Drain AP reset to 0.",
+  "PTR_AP.Chat.TempReset": "Manual Temp AP reset to 0.",
   "PTR_AP.Rule.Frequency": "Frequency",
   "PTR_AP.Rule.Max": "Max Charges",
   "PTR_AP.Rule.Reset": "Reset",
@@ -69,5 +85,17 @@
   "RULE.Type.PTUCharge": "Charge Number",
   "RULE.Type.TemporaryAPBonus": "Temporary AP Bonus",
   "RULES.Types.PTUCharge": "Charge Number",
-  "RULES.Types.TemporaryAPBonus": "Temporary AP Bonus"
+  "RULES.Types.TemporaryAPBonus": "Temporary AP Bonus",
+  "RULE": {
+    "Type": {
+      "PTUCharge": "Charge Number",
+      "TemporaryAPBonus": "Temporary AP Bonus"
+    }
+  },
+  "RULES": {
+    "Types": {
+      "PTUCharge": "Charge Number",
+      "TemporaryAPBonus": "Temporary AP Bonus"
+    }
+  }
 }

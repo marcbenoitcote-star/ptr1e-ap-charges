@@ -329,7 +329,7 @@ function renderResetControls(extraClass = "") {
   full.type = "button";
   full.dataset.ptrApAction = "reset-full";
   full.title = label("PTR_AP.FullReset", "New Day / Full AP Reset");
-  full.innerHTML = `<i class="fas fa-sun"></i> <span>${escapeHtml(label("PTR_AP.NewDay", "New Day"))}</span>`;
+  full.innerHTML = `<i class="fas fa-sun"></i> <span>${escapeHtml(label("PTR_AP.NewDay.Label", "New Day"))}</span>`;
 
   controls.append(scene, daily, full);
 
@@ -1532,7 +1532,7 @@ async function promptNewDayOptions(actors) {
   const title = label("PTR_AP.Confirm.FullReset.Title", "Confirm Full AP Reset");
   const message = format("PTR_AP.Confirm.FullReset.Content", { names }, `Choose recovery options for ${names}.`);
   const content = renderNewDayOptionsContent(message);
-  const confirmLabel = label("PTR_AP.Confirm", "Confirm");
+  const confirmLabel = label("PTR_AP.Confirm.Label", "Confirm");
   const cancelLabel = label("PTR_AP.Cancel", "Cancel");
 
   if (DialogV1) {

@@ -174,19 +174,22 @@ async function enhanceActorSheet(app, html) {
 }
 
 function injectApMeter(actor, root) {
-  root.querySelectorAll(".ptr-ap-meter, .ptr-ap-manual-controls, .ptr-ap-charge-controls").forEach((element) => element.remove());
+  root.querySelectorAll(".ptr-ap-enhancements, .ptr-ap-meter, .ptr-ap-manual-controls, .ptr-ap-charge-controls").forEach((element) => element.remove());
   const ap = getActorApData(actor);
   const tooltip = format("PTR_AP.Tooltip", ap, `Base AP: ${ap.baseAvailable} / ${ap.baseMaximum} / Temp: ${ap.temporaryLabel} / Bind: ${ap.bind} / Drain: ${ap.drain} / Total usable: ${ap.totalAvailable} / ${ap.totalUsableMax}`);
+
+  const anchors = getApSheetAnchors(root);
+  const enhancementHost = anchors.apBody ? document.createElement("div") : null;
+  if (enhancementHost) {
+    enhancementHost.className = "ptr-ap-enhancements";
+    anchors.apBody.insertAdjacentElement("afterend", enhancementHost);
+  }
 
   for (const range of root.querySelectorAll(".ap-range")) {
     range.classList.add("ptr-ap-native-range");
     range.min = 0;
     range.max = ap.baseUsableMax;
     range.title = tooltip;
-
-    const host = range.closest(".w-100") ?? range.parentElement;
-    if (!host) continue;
-    host.insertAdjacentElement("afterend", renderApMeter(ap, tooltip));
   }
 
   for (const input of root.querySelectorAll('input[name="system.ap.value"], input[name="system.ap.value input"]')) {
@@ -195,8 +198,10 @@ function injectApMeter(actor, root) {
     input.title = tooltip;
   }
 
-  injectManualApControls(actor, root);
-  injectResetControls(actor, root);
+  enhancementHost?.append(renderApMeter(ap, tooltip));
+
+  injectManualApControls(actor, root, enhancementHost);
+  injectResetControls(actor, root, enhancementHost);
 
   queueActorApClamp(actor, ap);
 }
@@ -233,12 +238,23 @@ function getApSegmentClass(index, ap) {
   return "drain";
 }
 
-function injectManualApControls(actor, root) {
+function getApSheetAnchors(root) {
+  const nativeRange = root.querySelector(".ap-range");
+  const valueInput = root.querySelector('input[name="system.ap.value"], input[name="system.ap.value input"]');
+  const anchor = nativeRange ?? valueInput;
+  const apBox = anchor?.closest(".swsh-box");
+  const apBody = apBox?.querySelector(".swsh-body") ?? anchor?.closest(".swsh-body") ?? null;
+
+  return { nativeRange, valueInput, apBody };
+}
+
+function injectManualApControls(actor, root, enhancementHost = null) {
   root.querySelectorAll(".ptr-ap-manual-controls").forEach((element) => element.remove());
   if (!actor.isOwner || !hasApResource(actor)) return;
 
-  const apBody = root.querySelector(".ap-range")?.closest(".swsh-box")?.querySelector(".swsh-body");
-  if (apBody) apBody.insertAdjacentElement("beforeend", renderManualApControls(actor));
+  const { apBody } = getApSheetAnchors(root);
+  const target = enhancementHost ?? apBody;
+  if (target) target.insertAdjacentElement("beforeend", renderManualApControls(actor));
 }
 
 function renderManualApControls(actor) {
@@ -295,13 +311,14 @@ function renderManualApRow(kind, value, min, max, labelText) {
   return row;
 }
 
-function injectResetControls(actor, root) {
+function injectResetControls(actor, root, enhancementHost = null) {
   root.querySelectorAll(".ptr-ap-charge-controls").forEach((element) => element.remove());
   if (!actor.isOwner) return;
 
-  const apBody = root.querySelector(".ap-range")?.closest(".swsh-box")?.querySelector(".swsh-body");
-  if (apBody) {
-    apBody.insertAdjacentElement("beforeend", renderResetControls());
+  const { apBody } = getApSheetAnchors(root);
+  const target = enhancementHost ?? apBody;
+  if (target) {
+    target.insertAdjacentElement("beforeend", renderResetControls());
     return;
   }
 

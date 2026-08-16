@@ -2,6 +2,15 @@
   display: none;
 }
 
+.ptr-ap-enhancements {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem 0.5rem;
+  box-sizing: border-box;
+}
+
 .ptr-ap-meter {
   display: flex;
   flex-direction: column;

@@ -141,6 +141,7 @@ The GitHub repository and release assets must be public so Forge and Foundry can
 ## Test Checklist
 
 - The AP range is replaced by a segmented meter on Trainer sheets.
+- The segmented meter and Manual AP controls render on PTR 4.4.3.37 sheets that expose `input[name="system.ap.value"]` without the legacy `.ap-range` element.
 - Green segments match current usable AP.
 - Grey segments show spent usable AP.
 - Blue segments show positive Temporary AP.
